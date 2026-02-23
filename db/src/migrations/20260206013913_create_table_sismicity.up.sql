@@ -1,0 +1,22 @@
+CREATE TABLE sismicity (
+    dt TEXT,
+    lat TEXT,
+    lon TEXT,
+    depth TEXT,
+    mag TEXT,
+    place TEXT,
+    source TEXT,
+    depth_log TEXT,
+    lat_offset TEXT,
+    lon_offset TEXT,
+    year TEXT,
+    month_sin TEXT,
+    month_cos TEXT,
+    hour_sin TEXT,
+    hour_cos TEXT,
+    rolling_count_7d TEXT,
+    rolling_count_30d TEXT,
+    rolling_mean_mag_30d TEXT,
+    days_since_last_major TEXT,
+    is_major TEXT
+);

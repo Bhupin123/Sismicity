@@ -1,0 +1,106 @@
+/* ── SeismoIQ Global Design System ─────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Bebas+Neue&display=swap');
+
+:root {
+  --void:   #03050a;
+  --deep:   #070d14;
+  --panel:  #0c1520;
+  --card:   #111d2b;
+  --raised: #172236;
+  --border: rgba(0,200,255,.08);
+  --bdr2:   rgba(0,200,255,.15);
+  --glow:   rgba(0,200,255,.10);
+
+  --plasma: #00c8ff;
+  --plasma2:#0084b4;
+  --hot:    #ff3d3d;
+  --warn:   #ff9f1c;
+  --ok:     #00e676;
+  --pur:    #b06aff;
+
+  --txt:    #c8dff0;
+  --txt2:   #5a7a99;
+  --txt3:   #2a4a66;
+
+  --font:    'Space Grotesk', sans-serif;
+  --mono:    'JetBrains Mono', monospace;
+  --display: 'Bebas Neue', sans-serif;
+
+  --radius:  10px;
+  --radius-lg: 14px;
+  --transition: all 0.18s ease;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--void);
+  color: var(--txt);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ─────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--deep); }
+::-webkit-scrollbar-thumb { background: var(--plasma2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--plasma); }
+
+/* ── Typography ─────────────────────────────── */
+h1, h2, h3, h4, h5 { font-family: var(--font); color: var(--txt); font-weight: 600; }
+a { color: var(--plasma); text-decoration: none; }
+code { font-family: var(--mono); font-size: 12px; }
+
+/* ── Utility classes ─────────────────────────── */
+.mono    { font-family: var(--mono); }
+.display { font-family: var(--display); }
+.txt2    { color: var(--txt2); }
+.txt3    { color: var(--txt3); }
+.plasma  { color: var(--plasma); }
+.hot     { color: var(--hot); }
+.ok      { color: var(--ok); }
+.warn    { color: var(--warn); }
+.pur     { color: var(--pur); }
+
+.flex        { display: flex; }
+.flex-col    { flex-direction: column; }
+.items-center{ align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-8  { gap: 8px; }
+.gap-12 { gap: 12px; }
+.gap-16 { gap: 16px; }
+.w-full { width: 100%; }
+
+/* ── Spinner ─────────────────────────────────── */
+.spinner {
+  width: 28px; height: 28px;
+  border: 2px solid var(--bdr2);
+  border-top-color: var(--plasma);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 32px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Empty state ─────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--txt2);
+}
+.empty-icon { font-size: 40px; margin-bottom: 12px; }
+
+/* ── Leaflet map overrides ─────────────────── */
+.leaflet-container { background: #060e18 !important; }
+.leaflet-tile      { filter: brightness(0.7) saturate(0.4); }
+.leaflet-control-attribution { background: rgba(7,13,20,.8) !important; color: var(--txt2) !important; }
+.leaflet-control-zoom a { background: var(--card) !important; color: var(--plasma) !important; border-color: var(--border) !important; }

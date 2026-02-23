@@ -1,0 +1,1 @@
+DROP TABLE std_sismicity;
