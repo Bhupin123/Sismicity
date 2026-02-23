@@ -1,0 +1,1 @@
+DROP TABLE Time_Dimension;

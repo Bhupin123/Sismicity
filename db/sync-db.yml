@@ -1,0 +1,10 @@
+basePath: src
+connectionResolver: connection-resolver.js
+
+sql:
+  # Procedures
+  # Transform
+  - procedure/transform_sismicity.sql
+migration:
+  directory: migrations
+  tableName: __sismicity_migrations
