@@ -1,6 +1,6 @@
 """
 SeismoIQ FastAPI Backend
-Complete earthquake intelligence API
+Complete earthquake intelligence API with USGS live data fetching
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from contextlib import contextmanager
 import asyncio
 import json
+import requests
 
 # ══════════════════════════════════════════════════════════════════════
 #  CONFIGURATION
@@ -291,7 +292,7 @@ async def get_stats(days_back: Optional[int] = None):
 
 @app.get("/api/earthquakes/timeline")
 async def get_timeline(
-    group_by: str = Query("day", regex="^(day|month|year)$"),
+    group_by: str = Query("day", pattern="^(day|month|year)$"),
     days_back: Optional[int] = None
 ):
     with get_db() as conn:
@@ -354,6 +355,97 @@ async def get_recent(hours: int = Query(24, ge=1, le=168), limit: int = Query(20
         cursor.execute(query, (hours, limit))
         results = cursor.fetchall()
         return [dict(row) for row in results]
+
+# ══════════════════════════════════════════════════════════════════════
+#  ENDPOINTS - USGS LIVE DATA FETCHING
+# ══════════════════════════════════════════════════════════════════════
+@app.post("/api/earthquakes/fetch-usgs")
+async def fetch_usgs_data(
+    days_back: int = Query(7, ge=1, le=30),
+    min_magnitude: float = Query(2.5, ge=0, le=10)
+):
+    """Fetch latest earthquake data from USGS and store in database"""
+    try:
+        # USGS API endpoint
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=days_back)
+        
+        url = "https://earthquake.usgs.gov/fdsnws/event/1/query"
+        params = {
+            'format': 'geojson',
+            'starttime': start_time.strftime('%Y-%m-%d'),
+            'endtime': end_time.strftime('%Y-%m-%d'),
+            'minmagnitude': min_magnitude,
+            'orderby': 'time'
+        }
+        
+        print(f"Fetching from USGS: {start_time.date()} to {end_time.date()}, min mag {min_magnitude}")
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        
+        features = data.get('features', [])
+        inserted = 0
+        skipped = 0
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            for feature in features:
+                props = feature['properties']
+                coords = feature['geometry']['coordinates']
+                
+                # Extract data
+                dt = datetime.fromtimestamp(props['time'] / 1000)
+                mag = props.get('mag')
+                depth = coords[2] if len(coords) > 2 else 0
+                lat = coords[1]
+                lon = coords[0]
+                place = props.get('place', 'Unknown')
+                
+                if mag is None:
+                    skipped += 1
+                    continue
+                
+                # Insert into database (check for duplicates)
+                try:
+                    # Check if event already exists (same time, location, magnitude)
+                    cursor.execute("""
+                        SELECT COUNT(*) as c FROM std_sismicity 
+                        WHERE dt = %s AND lat = %s AND lon = %s AND mag = %s
+                    """, (dt, lat, lon, mag))
+                    
+                    exists = cursor.fetchone()['c'] > 0
+                    
+                    if not exists:
+                        cursor.execute("""
+                            INSERT INTO std_sismicity 
+                            (dt, mag, depth, lat, lon, place, is_major, source)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        """, (dt, mag, depth, lat, lon, place, mag >= 5.5, 'USGS'))
+                        inserted += 1
+                    else:
+                        skipped += 1
+                except Exception as e:
+                    print(f"Error inserting event: {e}")
+                    skipped += 1
+            
+            conn.commit()
+        
+        print(f"✓ USGS fetch complete: {len(features)} fetched, {inserted} inserted, {skipped} skipped")
+        
+        return {
+            "success": True,
+            "fetched": len(features),
+            "inserted": inserted,
+            "skipped": skipped,
+            "message": f"Fetched {len(features)} events from USGS. Inserted {inserted} new records, skipped {skipped} duplicates."
+        }
+        
+    except requests.RequestException as e:
+        raise HTTPException(status_code=503, detail=f"USGS API error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # ══════════════════════════════════════════════════════════════════════
 #  ENDPOINTS - AI/ML
