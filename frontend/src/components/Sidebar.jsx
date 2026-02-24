@@ -10,6 +10,7 @@ const NAV = [
   { to: '/analytics',   icon: '', label: 'Analytics'   },
   { to: '/predictions', icon: '', label: 'AI Predict'  },
   { to: '/forecasting', icon: '', label: 'Forecasting' },
+  { to: '/live',        icon: '', label: 'Live Feed'   }, 
   { to: '/chat',        icon: '', label: 'AI Chat'     },
 ]
 

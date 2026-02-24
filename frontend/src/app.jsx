@@ -11,6 +11,7 @@ import Analytics   from './pages/Analytics'
 import Predictions from './pages/Predictions'
 import Forecasting from './pages/Forecasting'
 import Chat        from './pages/Chat'
+import LiveFeed    from './pages/LiveFeed'
 import './styles/layout.css'
 
 const PAGE_TITLES = {
@@ -20,6 +21,7 @@ const PAGE_TITLES = {
   '/predictions': 'AI Predictions',
   '/forecasting': 'Forecasting',
   '/chat':        'AI Chat',
+  '/live':        'USGS Live Feed',  // ← ADDED THIS
 }
 
 export default function App() {
@@ -70,6 +72,7 @@ export default function App() {
             <Route path="/predictions" element={<Predictions />} />
             <Route path="/forecasting" element={<Forecasting />} />
             <Route path="/chat"        element={<Chat />}        />
+            <Route path="/live"        element={<LiveFeed />}    />
           </Routes>
         </main>
       </div>
