@@ -10,31 +10,31 @@ const NAV = [
   { to: '/analytics',   icon: '', label: 'Analytics'   },
   { to: '/predictions', icon: '', label: 'AI Predict'  },
   { to: '/forecasting', icon: '', label: 'Forecasting' },
-  { to: '/live',        icon: '', label: 'Live Feed'   }, 
+  { to: '/live',        icon: '', label: 'Live Feed'   },
   { to: '/chat',        icon: '', label: 'AI Chat'     },
+  { to: '/alerts',      icon: '', label: 'Alerts'      },
 ]
 
 export default function Sidebar() {
   const health      = useAppStore((s) => s.health)
   const wsConnected = useAppStore((s) => s.wsConnected)
-  const svc         = health?.services || {}
 
+  // Backend returns flat: { database, ml_models, forecasting, ... }
+  // NOT nested under "services" — that was the bug
   const statusItems = [
-    { label: 'Database',    on: !!svc.database    },
-    { label: 'ML Models',   on: !!svc.ml_models   },
-    { label: 'Forecasting', on: !!svc.forecasting  },
-    { label: 'WebSocket',   on: wsConnected        },
+    { label: 'Database',    on: !!health?.database    },
+    { label: 'ML Models',   on: !!health?.ml_models   },
+    { label: 'Forecasting', on: !!health?.forecasting  },
+    { label: 'WebSocket',   on: wsConnected            },
   ]
 
   return (
     <aside className={styles.sidebar}>
-      {/* Brand */}
       <div className={styles.brand}>
         <div className={styles.logo}>SeismoIQ</div>
         <div className={styles.sub}>Intelligence Platform</div>
       </div>
 
-      {/* Nav */}
       <nav className={styles.nav}>
         <div className={styles.navSection}>Navigation</div>
         {NAV.map(({ to, icon, label }) => (
@@ -48,7 +48,6 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Status */}
       <div className={styles.status}>
         {statusItems.map((s) => (
           <StatusDot key={s.label} on={s.on} label={s.label} />
