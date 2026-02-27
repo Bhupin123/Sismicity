@@ -4,7 +4,7 @@ from sendgrid.helpers.mail import Mail
 from datetime import datetime
 
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
-FROM_EMAIL       = os.getenv('FROM_EMAIL', 'noreply@seismoiq.com')  # must be verified in SendGrid
+FROM_EMAIL       = os.getenv('FROM_EMAIL', 'noreply@seismoiq.com')  
 
 
 def send_earthquake_alert(to_email: str, earthquake: dict, user: dict) -> bool:
