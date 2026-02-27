@@ -1,11 +1,3 @@
-$env:Path += ";C:\Users\bhupi\AppData\Roaming\npm"
-
-# Verify
-yarn --version
-
-# AI/ML MODEL
-pip install scikit-learn xgboost tensorflow langchain langchain-anthropic chromadb sentence-transformers
-
 #  SeismoIQ — Earthquake Intelligence Platform
 
 > A full-stack AI-powered earthquake analytics platform with real-time data, machine learning predictions, interactive maps, and an intelligent chatbot assistant.
@@ -62,6 +54,8 @@ SeismoIQ is a comprehensive earthquake intelligence platform that ingests live e
 - **Plotly.js** — Interactive charts and visualizations
 - **Mapbox GL** — Interactive earthquake map
 - **Tailwind CSS** — Styling
+- # Verify
+yarn --version
 
 ### Backend
 - **FastAPI** (Python) — High-performance REST API
