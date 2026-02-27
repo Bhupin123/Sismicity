@@ -21,13 +21,31 @@ import requests
 from email_service import send_earthquake_alert, send_welcome_email_to_user
 
 # ══════════════════════════════════════════════════════════════════════
+#  LOAD .ENV MANUALLY (most reliable on Windows)
+# ══════════════════════════════════════════════════════════════════════
+def load_env():
+    env_path = r'C:\Users\bhupi\Sismicity\.env'
+    try:
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, val = line.split('=', 1)
+                    os.environ[key.strip()] = val.strip()
+        print("Environment variables loaded successfully")
+    except Exception as e:
+        print(f"Could not load .env: {e}")
+
+load_env()
+
+# ══════════════════════════════════════════════════════════════════════
 #  CONFIGURATION
 # ══════════════════════════════════════════════════════════════════════
 DB_CONFIG = {
-    'host': 'localhost',
-    'database': 'sismicity',
-    'user': 'postgres',
-    'password': 'bhupin85',
+    'host': os.environ.get('DB_HOST', 'localhost'),
+    'database': os.environ.get('DB_NAME', 'sismicity'),
+    'user': os.environ.get('DB_USERNAME', 'postgres'),
+    'password': os.environ.get('DB_PASSWORD', 'bhupin85'),
 }
 
 ML_MODELS_PATH = os.getenv('ML_MODELS_PATH', r'C:\Users\bhupi\Sismicity\ml')
@@ -52,18 +70,16 @@ def load_ml_models():
         path = os.path.join(ML_MODELS_PATH, fname)
         if os.path.exists(path):
             ml_models[key] = joblib.load(path)
-            print(f"✓ Loaded {fname}")
+            print(f"Loaded {fname}")
 
 # ══════════════════════════════════════════════════════════════════════
-#  LIFESPAN (replaces deprecated @app.on_event)
+#  LIFESPAN
 # ══════════════════════════════════════════════════════════════════════
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     load_ml_models()
-    print(f"✓ Loaded {len(ml_models)} ML model files")
+    print(f"Loaded {len(ml_models)} ML model files")
     yield
-    # Shutdown - add any cleanup here if needed
 
 # ══════════════════════════════════════════════════════════════════════
 #  FASTAPI APP
@@ -75,7 +91,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -138,8 +153,13 @@ class RiskAssessmentRequest(BaseModel):
     rolling_mean_mag_30d: float = Field(default=4.5, ge=0, le=10)
     days_since_last_major: float = Field(default=30, ge=0)
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
 class ChatRequest(BaseModel):
     message: str
+    history: Optional[List[ChatMessage]] = []
 
 class ProximityRequest(BaseModel):
     lat: float
@@ -158,14 +178,13 @@ class AlertSubscription(BaseModel):
 class AlertUnsubscribe(BaseModel):
     userId: str
 
-# Add this to store alert subscriptions (in production, use database)
+# Store alert subscriptions
 alert_subscriptions = {}
 
 # ══════════════════════════════════════════════════════════════════════
 #  HELPER FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════
 def build_features(data: dict) -> pd.DataFrame:
-    """Build ML feature dataframe from input dict"""
     depth = data.get('depth', 10)
     lat = data.get('lat', 0)
     lon = data.get('lon', 0)
@@ -204,10 +223,6 @@ def build_features(data: dict) -> pd.DataFrame:
 
 
 def check_and_send_alerts(new_earthquake: dict):
-    """
-    Check if new earthquake matches any user's alert criteria.
-    Call this function whenever a new earthquake is detected.
-    """
     try:
         eq_lat = new_earthquake.get('lat')
         eq_lon = new_earthquake.get('lon')
@@ -216,41 +231,26 @@ def check_and_send_alerts(new_earthquake: dict):
         if not all([eq_lat, eq_lon, eq_mag]):
             return
 
-        # Check each subscriber
         for user_id, sub in alert_subscriptions.items():
-            # Check if magnitude threshold met
             if eq_mag < sub['magnitude']:
                 continue
 
-            # Calculate distance
             from math import radians, sin, cos, sqrt, atan2
-
             lat1, lon1 = radians(sub['lat']), radians(sub['lon'])
             lat2, lon2 = radians(eq_lat), radians(eq_lon)
-
             dlat = lat2 - lat1
             dlon = lon2 - lon1
-
             a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
             c = 2 * atan2(sqrt(a), sqrt(1-a))
-            distance_km = 6371 * c  # Earth radius in km
+            distance_km = 6371 * c
 
-            # Check if within radius
             if distance_km <= sub['radius']:
-                print(f"🚨 Sending alert to {sub['email']} - M{eq_mag} at {distance_km:.0f}km")
-
-                earthquake_data = {
-                    **new_earthquake,
-                    'distance_km': distance_km
-                }
-
-                # Send email alert
+                print(f"Sending alert to {sub['email']} - M{eq_mag} at {distance_km:.0f}km")
                 send_earthquake_alert(
                     sub['email'],
-                    earthquake_data,
+                    {**new_earthquake, 'distance_km': distance_km},
                     {'email': sub['email']}
                 )
-
     except Exception as e:
         print(f"Error checking alerts: {e}")
 
@@ -259,11 +259,7 @@ def check_and_send_alerts(new_earthquake: dict):
 # ══════════════════════════════════════════════════════════════════════
 @app.get("/")
 async def root():
-    return {
-        "app": "SeismoIQ API",
-        "version": "1.0.0",
-        "status": "online"
-    }
+    return {"app": "SeismoIQ API", "version": "1.0.0", "status": "online"}
 
 @app.get("/api/health")
 async def health_check():
@@ -298,53 +294,43 @@ async def get_earthquakes(
 ):
     with get_db() as conn:
         cursor = conn.cursor()
-
         query = "SELECT * FROM std_sismicity WHERE 1=1"
         params = []
 
         if min_mag is not None:
-            query += f" AND mag >= %s"
+            query += " AND mag >= %s"
             params.append(min_mag)
         if max_mag is not None:
-            query += f" AND mag <= %s"
+            query += " AND mag <= %s"
             params.append(max_mag)
         if days_back is not None:
-            query += f" AND dt >= NOW() - INTERVAL '%s days'"
+            query += " AND dt >= NOW() - INTERVAL '%s days'"
             params.append(days_back)
         if is_major is not None:
-            query += f" AND is_major = %s"
+            query += " AND is_major = %s"
             params.append(is_major)
 
-        # Get total count
         count_query = query.replace("SELECT *", "SELECT COUNT(*)")
         cursor.execute(count_query, params)
         total = cursor.fetchone()['count']
 
-        # Get paginated results
-        query += f" ORDER BY dt DESC LIMIT %s OFFSET %s"
+        query += " ORDER BY dt DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         cursor.execute(query, params)
         results = cursor.fetchall()
 
-        return {
-            "count": total,
-            "results": [dict(row) for row in results]
-        }
+        return {"count": total, "results": [dict(row) for row in results]}
 
 @app.get("/api/earthquakes/stats")
 async def get_stats(days_back: Optional[int] = None):
     with get_db() as conn:
         cursor = conn.cursor()
-
         query = "SELECT COUNT(*) as total, AVG(mag) as avg_mag, MAX(mag) as max_mag, MIN(mag) as min_mag, AVG(depth) as avg_depth, MIN(dt) as date_earliest, MAX(dt) as date_latest FROM std_sismicity"
-
         if days_back:
             query += f" WHERE dt >= NOW() - INTERVAL '{days_back} days'"
-
         cursor.execute(query)
         stats = dict(cursor.fetchone())
 
-        # Get category counts
         cat_query = "SELECT COUNT(*) FILTER (WHERE mag >= 5.5) as major, COUNT(*) FILTER (WHERE mag >= 4 AND mag < 5.5) as moderate, COUNT(*) FILTER (WHERE mag < 4) as minor FROM std_sismicity"
         if days_back:
             cat_query += f" WHERE dt >= NOW() - INTERVAL '{days_back} days'"
@@ -371,10 +357,7 @@ async def get_timeline(
 ):
     with get_db() as conn:
         cursor = conn.cursor()
-
-        trunc_map = {'day': 'day', 'month': 'month', 'year': 'year'}
-        trunc = trunc_map[group_by]
-
+        trunc = group_by
         query = f"""
             SELECT DATE_TRUNC('{trunc}', dt) as period,
                    COUNT(*) as count,
@@ -382,15 +365,11 @@ async def get_timeline(
                    MAX(mag) as max_mag
             FROM std_sismicity
         """
-
         if days_back:
             query += f" WHERE dt >= NOW() - INTERVAL '{days_back} days'"
-
         query += " GROUP BY period ORDER BY period"
-
         cursor.execute(query)
         results = cursor.fetchall()
-
         return [{
             "period": str(row['period'])[:10],
             "count": row['count'],
@@ -403,14 +382,9 @@ async def get_by_location(limit: int = Query(15, ge=1, le=50)):
     with get_db() as conn:
         cursor = conn.cursor()
         query = """
-            SELECT place,
-                   COUNT(*) as count,
-                   AVG(mag) as avg_mag,
-                   MAX(mag) as max_mag
+            SELECT place, COUNT(*) as count, AVG(mag) as avg_mag, MAX(mag) as max_mag
             FROM std_sismicity
-            GROUP BY place
-            ORDER BY count DESC
-            LIMIT %s
+            GROUP BY place ORDER BY count DESC LIMIT %s
         """
         cursor.execute(query, (limit,))
         results = cursor.fetchall()
@@ -423,8 +397,7 @@ async def get_recent(hours: int = Query(24, ge=1, le=168), limit: int = Query(20
         query = """
             SELECT * FROM std_sismicity
             WHERE dt >= NOW() - INTERVAL '%s hours'
-            ORDER BY dt DESC
-            LIMIT %s
+            ORDER BY dt DESC LIMIT %s
         """
         cursor.execute(query, (hours, limit))
         results = cursor.fetchall()
@@ -438,9 +411,7 @@ async def fetch_usgs_data(
     days_back: int = Query(7, ge=1, le=30),
     min_magnitude: float = Query(2.5, ge=0, le=10)
 ):
-    """Fetch latest earthquake data from USGS and store in database"""
     try:
-        # USGS API endpoint
         end_time = datetime.now()
         start_time = end_time - timedelta(days=days_back)
 
@@ -453,23 +424,18 @@ async def fetch_usgs_data(
             'orderby': 'time'
         }
 
-        print(f"Fetching from USGS: {start_time.date()} to {end_time.date()}, min mag {min_magnitude}")
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
-
         features = data.get('features', [])
         inserted = 0
         skipped = 0
 
         with get_db() as conn:
             cursor = conn.cursor()
-
             for feature in features:
                 props = feature['properties']
                 coords = feature['geometry']['coordinates']
-
-                # Extract data
                 dt = datetime.fromtimestamp(props['time'] / 1000)
                 mag = props.get('mag')
                 depth = coords[2] if len(coords) > 2 else 0
@@ -481,20 +447,16 @@ async def fetch_usgs_data(
                     skipped += 1
                     continue
 
-                # Insert into database (check for duplicates)
                 try:
-                    # Check if event already exists (same time, location, magnitude)
                     cursor.execute("""
-                        SELECT COUNT(*) as c FROM std_sismicity 
+                        SELECT COUNT(*) as c FROM std_sismicity
                         WHERE dt = %s AND lat = %s AND lon = %s AND mag = %s
                     """, (dt, lat, lon, mag))
-
                     exists = cursor.fetchone()['c'] > 0
 
                     if not exists:
                         cursor.execute("""
-                            INSERT INTO std_sismicity 
-                            (dt, mag, depth, lat, lon, place, is_major, source)
+                            INSERT INTO std_sismicity (dt, mag, depth, lat, lon, place, is_major, source)
                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         """, (dt, mag, depth, lat, lon, place, mag >= 5.5, 'USGS'))
                         inserted += 1
@@ -506,35 +468,27 @@ async def fetch_usgs_data(
 
             conn.commit()
 
-        # ── Check alerts for every fetched earthquake ──────────────────
         for feature in features:
             props = feature['properties']
             coords = feature['geometry']['coordinates']
             mag = props.get('mag')
-
             if mag is None:
                 continue
-
-            new_eq = {
+            check_and_send_alerts({
                 'dt': datetime.fromtimestamp(props['time'] / 1000),
                 'mag': mag,
                 'depth': coords[2],
                 'lat': coords[1],
                 'lon': coords[0],
                 'place': props.get('place', 'Unknown')
-            }
-
-            check_and_send_alerts(new_eq)
-        # ──────────────────────────────────────────────────────────────
-
-        print(f"✓ USGS fetch complete: {len(features)} fetched, {inserted} inserted, {skipped} skipped")
+            })
 
         return {
             "success": True,
             "fetched": len(features),
             "inserted": inserted,
             "skipped": skipped,
-            "message": f"Fetched {len(features)} events from USGS. Inserted {inserted} new records, skipped {skipped} duplicates."
+            "message": f"Fetched {len(features)} events. Inserted {inserted} new, skipped {skipped} duplicates."
         }
 
     except requests.RequestException as e:
@@ -549,17 +503,14 @@ async def fetch_usgs_data(
 async def predict_magnitude(req: PredictMagnitudeRequest):
     if 'mag_model' not in ml_models:
         raise HTTPException(status_code=503, detail="ML models not loaded")
-
     try:
         df = build_features(req.dict())
         feats = [f for f in ml_models['mag_features'] if f in df.columns]
         X = df[feats].fillna(0)
         X_scaled = ml_models['mag_scaler'].transform(X)
         pred_mag = float(ml_models['mag_model'].predict(X_scaled)[0])
-
         confidence = min(95, 70 + abs(pred_mag - 4.5) * 5)
         category = 'Major' if pred_mag >= 5.5 else 'Moderate' if pred_mag >= 4.0 else 'Minor'
-
         return {
             "predicted_magnitude": round(pred_mag, 2),
             "category": category,
@@ -572,20 +523,14 @@ async def predict_magnitude(req: PredictMagnitudeRequest):
 async def assess_risk(req: RiskAssessmentRequest):
     if 'cls_model' not in ml_models:
         raise HTTPException(status_code=503, detail="Classifier not loaded")
-
     try:
         df = build_features(req.dict())
         feats = [f for f in ml_models['cls_features'] if f in df.columns]
         X = df[feats].fillna(0)
         X_scaled = ml_models['cls_scaler'].transform(X)
         prob = float(ml_models['cls_model'].predict_proba(X_scaled)[0][1]) * 100
-
         risk_level = 'HIGH' if prob > 70 else 'MODERATE' if prob > 30 else 'LOW'
-
-        return {
-            "probability": round(prob, 1),
-            "risk_level": risk_level
-        }
+        return {"probability": round(prob, 1), "risk_level": risk_level}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -631,7 +576,7 @@ async def check_proximity(req: ProximityRequest):
     return {"alerts": alerts, "count": len(alerts)}
 
 # ══════════════════════════════════════════════════════════════════════
-#  ENDPOINTS - CHAT
+#  ENDPOINTS - CHAT (GEMINI POWERED)
 # ══════════════════════════════════════════════════════════════════════
 chatbot = None
 
@@ -641,6 +586,7 @@ def get_chatbot():
         try:
             from chatbot import SeismicityChatbot
             chatbot = SeismicityChatbot()
+            print("Groq chatbot loaded successfully")
         except Exception as e:
             print(f"Chatbot init error: {e}")
     return chatbot
@@ -649,13 +595,14 @@ def get_chatbot():
 async def chat(req: ChatRequest):
     bot = get_chatbot()
     if not bot:
-        raise HTTPException(status_code=503, detail="Chatbot unavailable")
+        raise HTTPException(status_code=503, detail="Chatbot unavailable — check GROQ_API_KEY in .env")
 
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message required")
 
     try:
-        reply = bot.answer_question(req.message)
+        history = [{"role": msg.role, "content": msg.content} for msg in req.history] if req.history else []
+        reply = bot.answer_question(req.message, history)
         return {
             "response": reply,
             "timestamp": datetime.now().isoformat()
@@ -689,18 +636,13 @@ manager = ConnectionManager()
 @app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket):
     await manager.connect(websocket)
-
-    # Send latest event on connect
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM std_sismicity ORDER BY dt DESC LIMIT 1")
             latest = cursor.fetchone()
             if latest:
-                await websocket.send_json({
-                    "type": "latest_event",
-                    "data": dict(latest)
-                })
+                await websocket.send_json({"type": "latest_event", "data": dict(latest)})
     except:
         pass
 
@@ -718,7 +660,6 @@ async def websocket_live(websocket: WebSocket):
 # ══════════════════════════════════════════════════════════════════════
 @app.post("/api/alerts/subscribe")
 async def subscribe_to_alerts(sub: AlertSubscription):
-    """Subscribe user to earthquake email alerts"""
     try:
         alert_subscriptions[sub.userId] = {
             'email': sub.email,
@@ -728,46 +669,26 @@ async def subscribe_to_alerts(sub: AlertSubscription):
             'lon': sub.lon,
             'subscribed_at': datetime.now().isoformat()
         }
-
-        print(f"✓ User {sub.email} subscribed to alerts (M{sub.magnitude}+, {sub.radius}km radius)")
-
-        return {
-            "success": True,
-            "message": f"Subscribed to M{sub.magnitude}+ alerts within {sub.radius}km"
-        }
+        return {"success": True, "message": f"Subscribed to M{sub.magnitude}+ alerts within {sub.radius}km"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/alerts/unsubscribe")
 async def unsubscribe_from_alerts(unsub: AlertUnsubscribe):
-    """Unsubscribe user from alerts"""
     try:
         if unsub.userId in alert_subscriptions:
             del alert_subscriptions[unsub.userId]
-            print(f"✓ User unsubscribed from alerts")
-
-        return {
-            "success": True,
-            "message": "Unsubscribed from alerts"
-        }
+        return {"success": True, "message": "Unsubscribed from alerts"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/alerts/subscribers")
 async def get_subscribers():
-    """Get list of alert subscribers (admin only)"""
-    return {
-        "count": len(alert_subscriptions),
-        "subscribers": list(alert_subscriptions.values())
-    }
+    return {"count": len(alert_subscriptions), "subscribers": list(alert_subscriptions.values())}
 
 @app.post("/api/alerts/test")
 async def test_alert(email: str):
-    """Test email alert system"""
     try:
-        from email_service import send_earthquake_alert
-
-        # Sample earthquake data
         test_earthquake = {
             'mag': 5.2,
             'place': 'Test Location, Nepal',
@@ -775,22 +696,13 @@ async def test_alert(email: str):
             'dt': datetime.now(),
             'distance_km': 45
         }
-
-        test_user = {'email': email}
-
-        result = send_earthquake_alert(email, test_earthquake, test_user)
-
+        result = send_earthquake_alert(email, test_earthquake, {'email': email})
         if result:
-            return {
-                "success": True,
-                "message": f"Test email sent to {email}"
-            }
+            return {"success": True, "message": f"Test email sent to {email}"}
         else:
             raise HTTPException(status_code=500, detail="Email sending failed")
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # ══════════════════════════════════════════════════════════════════════
 #  ENTRY POINT
