@@ -18,7 +18,7 @@ export default function ProtectedRoute({ children }) {
         flexDirection: 'column',
         gap: 16
       }}>
-        <div style={{ fontSize: 52 }}>🌋</div>
+        <div style={{ fontSize: 52 }}></div>
         <div style={{ color: '#00c8ff', fontSize: 18, fontWeight: 600 }}>
           Loading SeismoIQ...
         </div>

@@ -35,7 +35,7 @@ def load_data_from_db():
             host="localhost",
             database="sismicity",
             user="postgres",
-            password="bhupin85"
+            password="admin"
         )
         
         query = """

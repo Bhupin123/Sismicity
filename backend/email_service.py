@@ -45,7 +45,7 @@ def send_earthquake_alert(to_email: str, earthquake: dict, user: dict) -> bool:
             <div style="background:linear-gradient(135deg,#0a1628,#1e2535);
                         padding:28px 32px;border-bottom:1px solid rgba(0,200,255,0.15);
                         text-align:center;">
-              <div style="font-size:36px;margin-bottom:6px;">🌋</div>
+              <div style="font-size:36px;margin-bottom:6px;"></div>
               <h1 style="color:#00c8ff;margin:0;font-size:22px;letter-spacing:0.05em;">
                 SeismoIQ Alert
               </h1>
@@ -152,7 +152,7 @@ def send_welcome_email_to_user(to_email: str, display_name: str) -> bool:
           <div style="max-width:560px;margin:40px auto;background:#0d1b2a;border-radius:16px;
                       border:1px solid rgba(0,200,255,0.2);overflow:hidden;">
             <div style="padding:40px 32px;text-align:center;">
-              <div style="font-size:48px;margin-bottom:12px;">🌋</div>
+              <div style="font-size:48px;margin-bottom:12px;"></div>
               <h1 style="color:#00c8ff;margin:0 0 8px;font-size:26px;">
                 Welcome to SeismoIQ!
               </h1>
@@ -181,7 +181,7 @@ def send_welcome_email_to_user(to_email: str, display_name: str) -> bool:
         message = Mail(
             from_email=FROM_EMAIL,
             to_emails=to_email,
-            subject='🌋 Welcome to SeismoIQ — Your Earthquake Intelligence Platform',
+            subject=' Welcome to SeismoIQ — Your Earthquake Intelligence Platform',
             html_content=html_content
         )
 
