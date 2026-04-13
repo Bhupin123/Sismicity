@@ -1,7 +1,6 @@
 import axios from 'axios'
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -9,13 +8,11 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// ── Request interceptor ───────────────────────────────────────────
 api.interceptors.request.use(
   (config) => config,
   (error)  => Promise.reject(error)
 )
 
-// ── Response interceptor ──────────────────────────────────────────
 api.interceptors.response.use(
   (response) => response.data,
   (error)    => {
@@ -25,35 +22,35 @@ api.interceptors.response.use(
   }
 )
 
-// ── Earthquake endpoints ──────────────────────────────────────────
 export const earthquakeService = {
-  getAll:       (params) => api.get('/api/earthquakes', { params }),
-  getStats:     (params) => api.get('/api/earthquakes/stats', { params }),
-  getTimeline:  (params) => api.get('/api/earthquakes/timeline', { params }),
-  getByLocation:(params) => api.get('/api/earthquakes/by-location', { params }),
-  getRecent:    (params) => api.get('/api/earthquakes/recent', { params }),
-  getHealth:    ()       => api.get('/api/health'),
-  getOne:       (id)     => api.get(`/api/earthquakes/${id}`),
+  getAll:        (params) => api.get('/api/earthquakes', { params }),
+  getStats:      (params) => api.get('/api/earthquakes/stats', { params }),
+  getTimeline:   (params) => api.get('/api/earthquakes/timeline', { params }),
+  getByLocation: (params) => api.get('/api/earthquakes/by-location', { params }),
+  getRecent:     (params) => api.get('/api/earthquakes/recent', { params }),
+  getHealth:     ()       => api.get('/api/health'),
+  getOne:        (id)     => api.get('/api/earthquakes/' + id),
 }
 
-// ── ML / AI endpoints ─────────────────────────────────────────────
 export const aiService = {
   predictMagnitude: (data) => api.post('/api/ai/predict-magnitude', data),
   assessRisk:       (data) => api.post('/api/ai/assess-risk', data),
   getStatus:        ()     => api.get('/api/ai/status'),
 }
 
-// ── Forecasting endpoints ─────────────────────────────────────────
 export const forecastService = {
   getForecast:  (params) => api.get('/api/forecast', { params }),
   getHotspots:  (params) => api.get('/api/forecast/hotspots', { params }),
   getProximity: (data)   => api.post('/api/forecast/proximity', data),
 }
 
-// ── Chat endpoint ─────────────────────────────────────────────────
 export const chatService = {
-  send:      (message) => api.post('/api/chat', { message }),
-  getStatus: ()        => api.get('/api/chat/status'),
+  send:      (message, history = []) => api.post('/api/chat', { message, history }),
+  getStatus: ()                      => api.get('/api/chat/status'),
+}
+
+export const usgsService = {
+  fetchLive: (params) => api.post('/api/earthquakes/fetch-usgs', null, { params }),
 }
 
 export default api
