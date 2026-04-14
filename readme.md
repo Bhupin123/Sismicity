@@ -142,6 +142,7 @@ Make sure you have the following installed before starting:
 - **Node.js 18+** — [Download](https://nodejs.org/)
 - **PostgreSQL 15** — [Download](https://www.postgresql.org/download/)
 - **Git** — [Download](https://git-scm.com/)
+- **Neon** — [Download](https://neon.com/)
 
 ---
 
