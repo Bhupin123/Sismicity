@@ -5,55 +5,47 @@ import { SeismoBarChart } from '../components/Charts'
 
 export default function Forecasting() {
   const [tab, setTab] = useState('forecast')
-
-  // Forecast state
-  const [days,      setDays]      = useState(7)
+  const [days, setDays] = useState(7)
   const [forecasts, setForecasts] = useState(null)
-  const [fLoading,  setFLoading]  = useState(false)
-
-  // Hotspot state
-  const [hotspots,  setHotspots]  = useState(null)
-  const [hLoading,  setHLoading]  = useState(false)
-
-  // Proximity state
+  const [fLoading, setFLoading] = useState(false)
+  const [hotspots, setHotspots] = useState(null)
+  const [hLoading, setHLoading] = useState(false)
   const [proxForm, setProxForm] = useState({ lat: 28.0, lon: 84.0, radius_km: 100, hours_back: 24 })
-  const [alerts,   setAlerts]   = useState(null)
+  const [alerts, setAlerts] = useState(null)
   const [aLoading, setALoading] = useState(false)
 
   const runForecast = async () => {
     setFLoading(true)
     const r = await forecastService.getForecast({ days_ahead: days }).catch(() => null)
-    setForecasts(r?.forecasts || [])
-    setFLoading(false)
+    setForecasts(r?.forecasts || []); setFLoading(false)
   }
-
   const runHotspots = async () => {
     setHLoading(true)
     const r = await forecastService.getHotspots({ eps_km: 50, min_samples: 5 }).catch(() => null)
-    setHotspots(r?.hotspots || [])
-    setHLoading(false)
+    setHotspots(r?.hotspots || []); setHLoading(false)
   }
-
   const runProximity = async () => {
     setALoading(true)
     const r = await forecastService.getProximity(proxForm).catch(() => null)
-    setAlerts(r?.alerts || [])
-    setALoading(false)
+    setAlerts(r?.alerts || []); setALoading(false)
   }
 
-  const catColor = (c) => c === 'Minor' ? 'var(--ok)' : c === 'Moderate' ? 'var(--warn)' : 'var(--hot)'
-  const riskColor= (r) => r >= 70 ? 'var(--hot)' : r >= 50 ? 'var(--warn)' : '#ff9f1c'
-  const magColor = (m) => m >= 6 ? 'var(--hot)' : m >= 5 ? 'var(--warn)' : 'var(--ok)'
+  const catColor  = (c) => c === 'Minor' ? 'var(--ok)' : c === 'Moderate' ? 'var(--warn)' : 'var(--hot)'
+  const riskColor = (r) => r >= 70 ? 'var(--hot)' : r >= 50 ? 'var(--warn)' : '#ff9f1c'
+  const magColor  = (m) => m >= 6 ? 'var(--hot)' : m >= 5 ? 'var(--warn)' : 'var(--ok)'
 
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+      {/* Tab buttons — scrollable on mobile */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 18, overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: 4 }}>
         {[['forecast',' Probability Forecast'],['hotspots',' Risk Hotspots'],['alerts',' Location Alerts']].map(([k,l]) => (
-          <button key={k} className={`filter-btn ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{l}</button>
+          <button key={k} className={`filter-btn ${tab === k ? 'active' : ''}`}
+            style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+            onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
-      {/* ── FORECAST ── */}
+      {/* FORECAST */}
       {tab === 'forecast' && (
         <div className="grid-4-6">
           <Panel title=" Forecast Settings">
@@ -64,13 +56,12 @@ export default function Forecasting() {
               </select>
             </div>
             <Btn full onClick={runForecast} disabled={fLoading}>
-              {fLoading ? ' Calculating…' : ' Generate Forecast'}
+              {fLoading ? '⟳ Calculating…' : '▶ Generate Forecast'}
             </Btn>
             {forecasts && (
               <div style={{ marginTop: 14, padding: 12, background: 'var(--raised)', borderRadius: 8,
                 fontSize: 12, color: 'var(--txt2)', lineHeight: 1.7 }}>
-                📌 <strong style={{ color: 'var(--txt)' }}>Method:</strong> Poisson process modeling using
-                historical earthquake frequency data. Probabilities are statistical estimates.
+                 <strong style={{ color: 'var(--txt)' }}>Method:</strong> Poisson process modeling using historical earthquake frequency data.
               </div>
             )}
           </Panel>
@@ -78,40 +69,36 @@ export default function Forecasting() {
           <Panel title={` Forecast — Next ${days} Days`} badge="POISSON MODEL">
             {fLoading && <div className="spinner" />}
             {!forecasts && !fLoading && (
-              <div className="empty-state">
-                <div className="empty-icon"></div>
-                <p>Click Generate Forecast to run the model</p>
-              </div>
+              <div className="empty-state"><div className="empty-icon"></div><p>Click Generate Forecast to run the model</p></div>
             )}
             {forecasts && forecasts.map((f, i) => (
               <div key={i} style={{
-                background: 'var(--card)', borderRadius: 10, padding: 18,
+                background: 'var(--card)', borderRadius: 10, padding: 16,
                 borderLeft: `3px solid ${catColor(f.category)}`, marginBottom: 12,
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: catColor(f.category),
-                      letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: catColor(f.category),
+                      letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>
                       {f.category} Earthquakes
                     </div>
-                    <div style={{ fontFamily: 'var(--display)', fontSize: 44, lineHeight: 1, color: catColor(f.category) }}>
-                      {Number(f.probability || 0).toFixed(0)}<span style={{ fontSize: 20 }}>%</span>
+                    <div style={{ fontFamily: 'var(--display)', fontSize: 36, lineHeight: 1, color: catColor(f.category) }}>
+                      {Number(f.probability || 0).toFixed(0)}<span style={{ fontSize: 16 }}>%</span>
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontFamily: 'var(--display)', fontSize: 26, color: 'var(--txt)' }}>
+                    <div style={{ fontFamily: 'var(--display)', fontSize: 22, color: 'var(--txt)' }}>
                       ~{Number(f.expected_count || 0).toFixed(1)}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--txt2)' }}>expected events</div>
-                    {f.rate_per_day && <div style={{ fontSize: 11, color: 'var(--txt2)', marginTop: 4 }}>
-                      {Number(f.rate_per_day).toFixed(2)}/day avg
+                    {f.rate_per_day && <div style={{ fontSize: 10, color: 'var(--txt2)', marginTop: 2 }}>
+                      {Number(f.rate_per_day).toFixed(2)}/day
                     </div>}
                   </div>
                 </div>
-                <div style={{ height: 5, background: 'var(--raised)', borderRadius: 3, marginTop: 12 }}>
+                <div style={{ height: 4, background: 'var(--raised)', borderRadius: 3, marginTop: 10 }}>
                   <div style={{ height: '100%', borderRadius: 3, background: catColor(f.category),
-                    width: `${Math.min(f.probability || 0, 100)}%`,
-                    transition: 'width 0.8s ease' }} />
+                    width: `${Math.min(f.probability || 0, 100)}%`, transition: 'width 0.8s ease' }} />
                 </div>
               </div>
             ))}
@@ -119,7 +106,7 @@ export default function Forecasting() {
         </div>
       )}
 
-      {/* ── HOTSPOTS ── */}
+      {/* HOTSPOTS */}
       {tab === 'hotspots' && (
         <div className="grid-4-6">
           <Panel title=" Cluster Settings">
@@ -127,10 +114,9 @@ export default function Forecasting() {
               Uses DBSCAN clustering to identify geographic zones with concentrated seismic activity.
             </p>
             <Btn full onClick={runHotspots} disabled={hLoading}>
-              {hLoading ? ' Analyzing…' : ' Detect Hotspots'}
+              {hLoading ? '⟳ Analyzing…' : ' Detect Hotspots'}
             </Btn>
           </Panel>
-
           <Panel title=" Active Seismic Zones" badge={hotspots ? `${hotspots.length} ZONES` : 'DBSCAN'}>
             {hLoading && <div className="spinner" />}
             {!hotspots && !hLoading && (
@@ -140,23 +126,24 @@ export default function Forecasting() {
               <div style={{ maxHeight: 480, overflowY: 'auto' }}>
                 {hotspots.map((h, i) => (
                   <div key={i} style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '12px 14px', background: 'var(--card)', borderRadius: 8,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 12px', background: 'var(--card)', borderRadius: 8,
                     marginBottom: 8, border: '1px solid var(--border)',
                   }}>
-                    <div style={{ fontFamily: 'var(--display)', fontSize: 22, color: 'var(--txt3)', width: 28 }}>
+                    <div style={{ fontFamily: 'var(--display)', fontSize: 18, color: 'var(--txt3)', width: 24, flexShrink: 0 }}>
                       #{i+1}
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--txt)', marginBottom: 2 }}>
-                        {String(h.location || '').slice(0, 45)}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--txt)', marginBottom: 2,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {String(h.location || '').slice(0, 40)}
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--txt2)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--txt2)' }}>
                         {h.event_count} events · M{h.max_magnitude} max · {h.recent_activity} last 30d
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontFamily: 'var(--display)', fontSize: 24, color: riskColor(h.risk_score) }}>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontFamily: 'var(--display)', fontSize: 20, color: riskColor(h.risk_score) }}>
                         {Number(h.risk_score || 0).toFixed(0)}
                       </div>
                       <div style={{ fontSize: 9, color: 'var(--txt2)' }}>/ 100</div>
@@ -169,11 +156,11 @@ export default function Forecasting() {
         </div>
       )}
 
-      {/* ── PROXIMITY ALERTS ── */}
+      {/* PROXIMITY ALERTS */}
       {tab === 'alerts' && (
         <div className="grid-4-6">
           <Panel title=" Your Location">
-            <div className="form-grid" style={{ gridTemplateColumns: '1fr' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {[['lat','Latitude','0.1'],['lon','Longitude','0.1']].map(([k,l,s]) => (
                 <div className="form-field" key={k}>
                   <label className="form-label">{l}</label>
@@ -200,7 +187,7 @@ export default function Forecasting() {
               </div>
             </div>
             <Btn full onClick={runProximity} disabled={aLoading} style={{ marginTop: 16 }}>
-              {aLoading ? ' Searching…' : ' Check My Area'}
+              {aLoading ? '⟳ Searching…' : ' Check My Area'}
             </Btn>
           </Panel>
 
@@ -214,20 +201,21 @@ export default function Forecasting() {
             )}
             {alerts && alerts.map((a, i) => (
               <div key={i} style={{
-                padding: '12px 14px', background: 'var(--card)', borderRadius: 8,
+                padding: '10px 12px', background: 'var(--card)', borderRadius: 8,
                 marginBottom: 8, borderLeft: `3px solid ${magColor(a.magnitude)}`,
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontFamily: 'var(--display)', fontSize: 22, color: magColor(a.magnitude) }}>
+                  <div style={{ fontFamily: 'var(--display)', fontSize: 20, color: magColor(a.magnitude) }}>
                     M{a.magnitude}
                   </div>
-                  <span style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--txt2)',
-                    background: 'var(--raised)', padding: '2px 8px', borderRadius: 4 }}>
+                  <span style={{ fontSize: 9, fontFamily: 'var(--mono)', color: 'var(--txt2)',
+                    background: 'var(--raised)', padding: '2px 6px', borderRadius: 4 }}>
                     {a.severity}
                   </span>
                 </div>
-                <div style={{ fontSize: 13, color: 'var(--txt)', margin: '4px 0' }}>{a.location}</div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--txt2)' }}>
+                <div style={{ fontSize: 12, color: 'var(--txt)', margin: '4px 0',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.location}</div>
+                <div style={{ display: 'flex', gap: 10, fontSize: 10, color: 'var(--txt2)', flexWrap: 'wrap' }}>
                   <span> {Number(a.distance_km || 0).toFixed(1)} km</span>
                   <span> {Number(a.hours_ago || 0).toFixed(1)}h ago</span>
                   <span> {Number(a.depth || 0).toFixed(0)} km deep</span>

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom'
 import { onAuthStateChanged } from 'firebase/auth'
 import { auth, logoutUser } from './services/firebase'
@@ -48,6 +48,7 @@ function AppLayout() {
   const setNotification = useAppStore((s) => s.setNotification)
   const user            = useAuthStore((s) => s.user)
   const clearUser       = useAuthStore((s) => s.clearUser)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useWebSocket()
 
@@ -61,10 +62,13 @@ function AppLayout() {
     return () => clearInterval(t)
   }, [])
 
+  // Close sidebar on route change
+  useEffect(() => { setSidebarOpen(false) }, [location.pathname])
+
   const handleLogout = async () => {
     await logoutUser()
     clearUser()
-    setNotification('👋 Logged out successfully')
+    setNotification(' Logged out successfully')
     navigate('/login')
   }
 
@@ -73,14 +77,29 @@ function AppLayout() {
 
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
       <div className="app-main">
         <header className="topbar">
           <div className="topbar-left">
+            {/* Hamburger — only visible on mobile via CSS */}
+            <button
+              className="menu-toggle"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              aria-label="Toggle menu"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--txt)', fontSize: 20, padding: '2px 6px',
+                lineHeight: 1, marginRight: 4,
+              }}
+            >
+              {sidebarOpen ? '✕' : '☰'}
+            </button>
             <span className="breadcrumb">SeismoIQ</span>
             <span className="breadcrumb-sep">›</span>
             <span className="page-title">{pageTitle}</span>
           </div>
+
           <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <span className="topbar-badge mono">{now}</span>
             <div style={{
@@ -100,9 +119,10 @@ function AppLayout() {
               </div>
               <span style={{
                 color: '#b0c8e0', fontSize: 13,
-                maxWidth: 140, overflow: 'hidden',
+                maxWidth: 120, overflow: 'hidden',
                 textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>
+              }}
+              className="user-name-label">
                 {user?.displayName || user?.email || 'User'}
               </span>
             </div>
@@ -136,6 +156,15 @@ function AppLayout() {
           </Routes>
         </main>
       </div>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="sidebar-overlay open"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       <Notification msg={notification} />
     </div>
   )

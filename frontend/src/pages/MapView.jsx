@@ -8,9 +8,12 @@ import FilterBar from '../components/FilterBar'
 
 export default function MapView() {
   const { params } = useFilters()
-  const [events,   setEvents]   = useState([])
-  const [locations,setLocations] = useState([])
-  const [loading,  setLoading]  = useState(true)
+  const [events,    setEvents]    = useState([])
+  const [locations, setLocations] = useState([])
+  const [loading,   setLoading]   = useState(true)
+
+  // Responsive map height
+  const mapHeight = window.innerWidth < 640 ? 260 : window.innerWidth < 900 ? 340 : 480
 
   useEffect(() => {
     setLoading(true)
@@ -31,7 +34,7 @@ export default function MapView() {
       <Panel title=" Earthquake Epicenters" badge={`${events.length.toLocaleString()} EVENTS`}>
         {loading
           ? <div className="spinner" />
-          : <EarthquakeMap events={events} height={480} />
+          : <EarthquakeMap events={events} height={mapHeight} />
         }
       </Panel>
 

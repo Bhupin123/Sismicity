@@ -1,87 +1,107 @@
+/* ── Sidebar base ────────────────────────────────────────────── */
 .sidebar {
   width: 220px;
   flex-shrink: 0;
-  background: var(--deep);
-  border-right: 1px solid var(--bdr2);
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  background: var(--deep);
+  border-right: 1px solid var(--border);
   overflow: hidden;
+  transition: transform 0.25s ease;
+  z-index: 100;
 }
 
+/* ── Brand ───────────────────────────────────────────────────── */
 .brand {
-  padding: 24px 20px 20px;
+  padding: 22px 20px 18px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .logo {
-  font-family: var(--display);
-  font-size: 26px;
-  letter-spacing: 2px;
-  background: linear-gradient(135deg, var(--plasma), #66e5ff);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  line-height: 1;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--plasma);
+  font-family: var(--display, monospace);
 }
 .sub {
   font-size: 9px;
   font-weight: 600;
-  letter-spacing: 3px;
-  color: var(--txt3);
+  letter-spacing: 2px;
   text-transform: uppercase;
-  margin-top: 4px;
+  color: var(--txt3);
+  margin-top: 3px;
 }
 
-.nav { flex: 1; padding: 8px 0; overflow-y: auto; }
+/* ── Nav ─────────────────────────────────────────────────────── */
+.nav {
+  flex: 1;
+  padding: 12px 10px;
+  overflow-y: auto;
+}
 .navSection {
-  padding: 14px 16px 6px;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 2.5px;
-  color: var(--txt3);
+  letter-spacing: 2px;
   text-transform: uppercase;
+  color: var(--txt3);
+  padding: 6px 10px 8px;
+  margin-top: 4px;
 }
 .navItem {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 16px;
-  margin: 1px 8px;
+  padding: 9px 12px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   color: var(--txt2);
   text-decoration: none;
-  transition: var(--transition);
-  position: relative;
+  transition: all 0.15s ease;
+  margin-bottom: 2px;
+  cursor: pointer;
 }
 .navItem:hover {
-  background: var(--glow);
+  background: rgba(0,200,255,0.06);
   color: var(--txt);
 }
 .active {
-  background: linear-gradient(135deg, rgba(0,200,255,.14), rgba(0,100,180,.1)) !important;
+  background: rgba(0,200,255,0.12) !important;
   color: var(--plasma) !important;
-  border: 1px solid rgba(0,200,255,.2);
-}
-.active::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 20px;
-  background: var(--plasma);
-  border-radius: 0 2px 2px 0;
+  font-weight: 600;
 }
 .navIcon {
-  font-size: 16px;
-  width: 20px;
+  font-size: 14px;
+  width: 18px;
   text-align: center;
+  flex-shrink: 0;
 }
 
+/* ── Status ──────────────────────────────────────────────────── */
 .status {
-  padding: 14px;
+  padding: 12px 14px 16px;
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE
+══════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    width: 240px;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    z-index: 200;
+  }
+
+  .mobileOpen {
+    transform: translateX(0) !important;
+  }
 }

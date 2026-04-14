@@ -3,17 +3,17 @@ import { chatService } from '../services/api'
 import { Panel, WaveAnim, Btn } from '../components/UI'
 
 const QUICK = [
-  'How many total earthquakes are in the database?',
-  'What was the largest earthquake recorded?',
-  'Which locations are most seismically active?',
-  'What is the recent trend in seismic activity?',
-  'What is the average earthquake depth?',
+  'How many total earthquakes?',
+  'Largest earthquake recorded?',
+  'Most seismically active locations?',
+  'Recent trend in seismic activity?',
+  'Average earthquake depth?',
 ]
 
 export default function Chat() {
   const [messages, setMessages] = useState([{
     role: 'bot',
-    text: ' Hello! I\'m SeismoIQ — your earthquake intelligence assistant powered by AI.\n\nAsk me anything about seismic patterns, statistics, locations, or trends in the data.',
+    text: ' Hello! I\'m SeismoIQ — your earthquake intelligence assistant.\n\nAsk me anything about seismic patterns, statistics, or trends.',
   }])
   const [input,   setInput]   = useState('')
   const [loading, setLoading] = useState(false)
@@ -31,9 +31,9 @@ export default function Chat() {
     setLoading(true)
     try {
       const res = await chatService.send(q)
-      setMessages((m) => [...m, { role: 'bot', text: res.response || '⚠️ No response received.' }])
+      setMessages((m) => [...m, { role: 'bot', text: res.response || ' No response received.' }])
     } catch (e) {
-      setMessages((m) => [...m, { role: 'bot', text: `⚠️ Error: ${e.message}` }])
+      setMessages((m) => [...m, { role: 'bot', text: ` Error: ${e.message}` }])
     }
     setLoading(false)
   }
@@ -43,71 +43,82 @@ export default function Chat() {
       <Panel>
         {/* Header */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '14px 18px', borderBottom: '1px solid var(--border)',
-          background: 'var(--card)',
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '12px 16px', borderBottom: '1px solid var(--border)',
+          background: 'var(--card)', flexWrap: 'wrap',
         }}>
           <WaveAnim />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--txt)' }}>SeismoIQ Chat Assistant</div>
-            <div style={{ fontSize: 10, color: 'var(--txt2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
+          <div style={{ flex: 1, minWidth: 140 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--txt)' }}>SeismoIQ Chat</div>
+            <div style={{ fontSize: 9, color: 'var(--txt2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
               AI-POWERED EARTHQUAKE ANALYTICS
             </div>
           </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 5,
             background: 'rgba(0,230,118,.08)', border: '1px solid rgba(0,230,118,.2)',
-            padding: '3px 10px', borderRadius: 20, fontSize: 10, fontWeight: 700, color: 'var(--ok)' }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--ok)',
-              animation: 'pulse 1.8s infinite' }} />
+            padding: '3px 8px', borderRadius: 20, fontSize: 9, fontWeight: 700, color: 'var(--ok)',
+          }}>
+            <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--ok)', animation: 'pulse 1.8s infinite' }} />
             LIVE
           </div>
         </div>
 
-        {/* Quick questions */}
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)',
-          display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {/* Quick questions — scrollable on mobile */}
+        <div style={{
+          padding: '8px 12px', borderBottom: '1px solid var(--border)',
+          display: 'flex', gap: 6, overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none', msOverflowStyle: 'none',
+        }}
+        onMouseEnter={e => e.currentTarget.style.scrollbarWidth = 'none'}
+        >
           {QUICK.map((q) => (
             <button key={q} onClick={() => send(q)} style={{
               padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
               cursor: 'pointer', border: '1px solid var(--bdr2)',
               background: 'var(--raised)', color: 'var(--txt2)',
+              whiteSpace: 'nowrap', flexShrink: 0,
               transition: 'var(--transition)',
             }}
             onMouseEnter={(e) => { e.target.style.borderColor = 'var(--plasma)'; e.target.style.color = 'var(--plasma)' }}
-            onMouseLeave={(e) => { e.target.style.borderColor = 'var(--bdr2)';   e.target.style.color = 'var(--txt2)' }}>
-              {q.length > 30 ? q.slice(0, 30) + '…' : q}
+            onMouseLeave={(e) => { e.target.style.borderColor = 'var(--bdr2)'; e.target.style.color = 'var(--txt2)' }}>
+              {q}
             </button>
           ))}
         </div>
 
         {/* Messages */}
-        <div style={{ height: 380, overflowY: 'auto', padding: 14,
-          display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{
+          height: 340, overflowY: 'auto', padding: 12,
+          display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
           {messages.map((m, i) => (
             <div key={i} style={{
-              maxWidth: '82%',
+              maxWidth: '85%',
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              padding: '10px 14px', borderRadius: 10,
+              padding: '9px 13px',
               fontSize: 13, lineHeight: 1.55,
               background: m.role === 'user'
                 ? 'linear-gradient(135deg,rgba(0,200,255,.2),rgba(0,130,180,.15))'
                 : 'var(--raised)',
               border: `1px solid ${m.role === 'user' ? 'rgba(0,200,255,.2)' : 'var(--border)'}`,
               borderRadius: m.role === 'user' ? '10px 10px 2px 10px' : '10px 10px 10px 2px',
-              whiteSpace: 'pre-wrap',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
             }}>
               {m.text}
             </div>
           ))}
           {loading && (
             <div style={{
-              alignSelf: 'flex-start', padding: '10px 14px', borderRadius: '10px 10px 10px 2px',
+              alignSelf: 'flex-start', padding: '9px 13px',
+              borderRadius: '10px 10px 10px 2px',
               background: 'var(--raised)', border: '1px solid var(--border)',
-              display: 'flex', alignItems: 'center', gap: 6,
+              display: 'flex', alignItems: 'center', gap: 5,
             }}>
               {[0, 150, 300].map((d) => (
                 <div key={d} style={{
-                  width: 7, height: 7, background: 'var(--plasma)', borderRadius: '50%',
+                  width: 6, height: 6, background: 'var(--plasma)', borderRadius: '50%',
                   animation: `pulse 1.2s ${d}ms infinite`,
                 }} />
               ))}
@@ -117,24 +128,29 @@ export default function Chat() {
         </div>
 
         {/* Input */}
-        <div style={{ display: 'flex', gap: 8, padding: 12,
-          borderTop: '1px solid var(--border)' }}>
+        <div style={{
+          display: 'flex', gap: 8, padding: 10,
+          borderTop: '1px solid var(--border)',
+          flexWrap: 'wrap',
+        }}>
           <input
             className="form-input"
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: 0 }}
             value={input}
-            placeholder="Ask about earthquake data, patterns, or statistics…"
+            placeholder="Ask about earthquake data…"
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !loading && send()}
           />
-          <Btn onClick={() => send()} disabled={loading || !input.trim()}>
-            Send ↵
-          </Btn>
-          {messages.length > 1 && (
-            <Btn variant="secondary" onClick={() => setMessages([messages[0]])}>
-              Clear
+          <div style={{ display: 'flex', gap: 6 }}>
+            <Btn onClick={() => send()} disabled={loading || !input.trim()}>
+              Send ↵
             </Btn>
-          )}
+            {messages.length > 1 && (
+              <Btn variant="secondary" onClick={() => setMessages([messages[0]])}>
+                Clear
+              </Btn>
+            )}
+          </div>
         </div>
       </Panel>
     </div>

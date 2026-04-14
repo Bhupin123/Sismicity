@@ -37,9 +37,9 @@ export default function Settings() {
     const result = await subscribeToAlerts(user.uid, settings)
     
     if (result.success) {
-      alert('✅ Alert settings saved!')
+      alert(' Alert settings saved!')
     } else {
-      alert('❌ Failed to save settings')
+      alert(' Failed to save settings')
     }
     
     setLoading(false)
