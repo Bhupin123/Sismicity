@@ -26,7 +26,7 @@
   --mono:    'JetBrains Mono', monospace;
   --display: 'Bebas Neue', sans-serif;
 
-  --radius:  10px;
+  --radius:    10px;
   --radius-lg: 14px;
   --transition: all 0.18s ease;
 }
@@ -37,7 +37,13 @@
   padding: 0;
 }
 
-html, body, #root {
+html {
+  width: 100%;
+  height: 100%;
+  background: #03050a;
+}
+
+body {
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -47,6 +53,20 @@ html, body, #root {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* Fix mobile browser viewport */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Scrollbar ─────────────────────────────── */
@@ -60,7 +80,7 @@ h1, h2, h3, h4, h5 { font-family: var(--font); color: var(--txt); font-weight: 6
 a { color: var(--plasma); text-decoration: none; }
 code { font-family: var(--mono); font-size: 12px; }
 
-/* ── Utility classes ─────────────────────────── */
+/* ── Utility ─────────────────────────────────── */
 .mono    { font-family: var(--mono); }
 .display { font-family: var(--display); }
 .txt2    { color: var(--txt2); }
@@ -70,7 +90,6 @@ code { font-family: var(--mono); font-size: 12px; }
 .ok      { color: var(--ok); }
 .warn    { color: var(--warn); }
 .pur     { color: var(--pur); }
-
 .flex        { display: flex; }
 .flex-col    { flex-direction: column; }
 .items-center{ align-items: center; }
@@ -92,14 +111,10 @@ code { font-family: var(--mono); font-size: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Empty state ─────────────────────────────── */
-.empty-state {
-  text-align: center;
-  padding: 48px 24px;
-  color: var(--txt2);
-}
-.empty-icon { font-size: 40px; margin-bottom: 12px; }
+.empty-state { text-align: center; padding: 48px 24px; color: var(--txt2); }
+.empty-icon  { font-size: 40px; margin-bottom: 12px; }
 
-/* ── Leaflet map overrides ─────────────────── */
+/* ── Leaflet ─────────────────────────────────── */
 .leaflet-container { background: #060e18 !important; }
 .leaflet-tile      { filter: brightness(0.7) saturate(0.4); }
 .leaflet-control-attribution { background: rgba(7,13,20,.8) !important; color: var(--txt2) !important; }
