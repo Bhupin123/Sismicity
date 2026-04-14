@@ -51,6 +51,7 @@ sys.path.insert(0, ML_MODELS_PATH)
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
+    "https://seismoiq.vercel.app",
 ]
 _frontend_url = os.environ.get("FRONTEND_URL", "")
 if _frontend_url:
@@ -75,9 +76,9 @@ def load_ml_models():
         path = os.path.join(ML_MODELS_PATH, fname)
         if os.path.exists(path):
             ml_models[key] = joblib.load(path)
-            print(f"✅ Loaded {fname}")
+            print(f" Loaded {fname}")
         else:
-            print(f"⚠️  Not found: {path}")
+            print(f"  Not found: {path}")
 
 # ══════════════════════════════════════════════════════════════════════
 #  LIFESPAN
@@ -85,7 +86,7 @@ def load_ml_models():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_ml_models()
-    print(f"✅ Loaded {len(ml_models)} ML model files")
+    print(f" Loaded {len(ml_models)} ML model files")
     yield
 
 # ══════════════════════════════════════════════════════════════════════
@@ -254,7 +255,7 @@ def check_and_send_alerts(new_earthquake: dict):
             distance_km = 6371 * c
 
             if distance_km <= sub['radius']:
-                print(f"📧 Sending alert to {sub['email']} — M{eq_mag} at {distance_km:.0f}km")
+                print(f" Sending alert to {sub['email']} — M{eq_mag} at {distance_km:.0f}km")
                 send_earthquake_alert(
                     sub['email'],
                     {**new_earthquake, 'distance_km': distance_km},
@@ -270,7 +271,7 @@ def check_and_send_alerts(new_earthquake: dict):
 async def root():
     return {"app": "SeismoIQ API", "version": "1.0.0", "status": "online"}
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health_check():
     try:
         with get_db() as conn:
@@ -597,7 +598,7 @@ def get_chatbot():
         try:
             from chatbot import SeismicityChatbot
             chatbot = SeismicityChatbot()
-            print("✅ Groq chatbot loaded")
+            print(" Groq chatbot loaded")
         except Exception as e:
             print(f"Chatbot init error: {e}")
     return chatbot
