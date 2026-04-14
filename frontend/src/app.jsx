@@ -6,9 +6,9 @@ import { earthquakeService } from './services/api'
 import { useAppStore } from './store/useAppStore'
 import { useAuthStore } from './store/useAuthStore'
 import { useWebSocket } from './hooks'
-import Sidebar         from './components/Sidebar'
+import Sidebar from './components/Sidebar'
 import { Notification } from './components/UI'
-import ProtectedRoute  from './components/ProtectedRoute'
+import ProtectedRoute from './components/ProtectedRoute'
 import Overview    from './pages/Overview'
 import MapView     from './pages/MapView'
 import Analytics   from './pages/Analytics'
@@ -62,21 +62,22 @@ function AppLayout() {
     return () => clearInterval(t)
   }, [])
 
-  // Close sidebar on route change
+  // Auto-close sidebar on route change
   useEffect(() => { setSidebarOpen(false) }, [location.pathname])
 
   const handleLogout = async () => {
     await logoutUser()
     clearUser()
-    setNotification(' Logged out successfully')
+    setNotification('👋 Logged out successfully')
     navigate('/login')
   }
 
   const pageTitle = PAGE_TITLES[location.pathname] || 'SeismoIQ'
-  const now       = new Date().toLocaleTimeString()
+  const now = new Date().toLocaleTimeString()
 
   return (
     <div className="app-shell">
+      {/* Sidebar — receives open state and close handler */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="app-main">
@@ -85,13 +86,8 @@ function AppLayout() {
             {/* Hamburger — only visible on mobile via CSS */}
             <button
               className="menu-toggle"
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              aria-label="Toggle menu"
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--txt)', fontSize: 20, padding: '2px 6px',
-                lineHeight: 1, marginRight: 4,
-              }}
+              onClick={() => setSidebarOpen(prev => !prev)}
+              aria-label="Toggle navigation"
             >
               {sidebarOpen ? '✕' : '☰'}
             </button>
@@ -100,7 +96,7 @@ function AppLayout() {
             <span className="page-title">{pageTitle}</span>
           </div>
 
-          <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="topbar-right">
             <span className="topbar-badge mono">{now}</span>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
@@ -117,12 +113,11 @@ function AppLayout() {
               }}>
                 {(user?.displayName || user?.email || 'U')[0].toUpperCase()}
               </div>
-              <span style={{
+              <span className="user-label" style={{
                 color: '#b0c8e0', fontSize: 13,
                 maxWidth: 120, overflow: 'hidden',
                 textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}
-              className="user-name-label">
+              }}>
                 {user?.displayName || user?.email || 'User'}
               </span>
             </div>
@@ -132,10 +127,8 @@ function AppLayout() {
                 padding: '6px 14px', background: 'transparent',
                 border: '1px solid rgba(255,80,80,0.35)',
                 borderRadius: 6, color: '#ff6060',
-                fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s',
+                fontSize: 12, fontWeight: 600, cursor: 'pointer',
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,80,80,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,80,80,0.7)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'rgba(255,80,80,0.35)' }}
             >
               Logout
             </button>
@@ -157,14 +150,6 @@ function AppLayout() {
         </main>
       </div>
 
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="sidebar-overlay open"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
       <Notification msg={notification} />
     </div>
   )
@@ -175,9 +160,9 @@ function AuthSplash() {
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center',
       justifyContent: 'center', background: '#0a1628',
-      flexDirection: 'column', gap: 16
+      flexDirection: 'column', gap: 16,
     }}>
-      <div style={{ fontSize: 52 }}></div>
+      <div style={{ fontSize: 52 }}>🌍</div>
       <div style={{ color: '#00c8ff', fontSize: 18, fontWeight: 600 }}>Loading SeismoIQ...</div>
     </div>
   )

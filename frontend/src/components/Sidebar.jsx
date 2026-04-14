@@ -23,19 +23,27 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
     const onResize = () => { if (window.innerWidth > 900) onClose() }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [onClose])
+  }, [])
 
   const statusItems = [
-    { label: 'Database',    on: !!health?.database    },
-    { label: 'ML Models',   on: !!health?.ml_models   },
-    { label: 'Forecasting', on: !!health?.forecasting  },
-    { label: 'WebSocket',   on: wsConnected            },
+    { label: 'Database',    on: !!health?.database   },
+    { label: 'ML Models',   on: !!health?.ml_models  },
+    { label: 'Forecasting', on: !!health?.forecasting },
+    { label: 'WebSocket',   on: wsConnected           },
   ]
 
   return (
     <>
+      {/* Dim overlay when sidebar open on mobile */}
       {open && (
-        <div className="sidebar-overlay open" onClick={onClose} />
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.6)',
+            zIndex: 150,
+          }}
+          onClick={onClose}
+        />
       )}
 
       <aside className={`${styles.sidebar} ${open ? styles.mobileOpen : ''}`}>
@@ -47,11 +55,13 @@ export default function Sidebar({ open = false, onClose = () => {} }) {
         <nav className={styles.nav}>
           <div className={styles.navSection}>Navigation</div>
           {NAV.map(({ to, icon, label }) => (
-            <NavLink key={to} to={to} end={to === '/'}
+            <NavLink
+              key={to} to={to} end={to === '/'}
               onClick={onClose}
               className={({ isActive }) =>
                 `${styles.navItem} ${isActive ? styles.active : ''}`
-              }>
+              }
+            >
               <span className={styles.navIcon}>{icon}</span>
               {label}
             </NavLink>
