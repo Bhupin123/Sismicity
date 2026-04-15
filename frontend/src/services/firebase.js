@@ -11,8 +11,9 @@ import {
   FacebookAuthProvider
 } from 'firebase/auth';
 import { 
-  getFirestore,
-  enableIndexedDbPersistence,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   doc, 
   setDoc, 
   getDoc, 
@@ -37,15 +38,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db   = getFirestore(app);
-
-enableIndexedDbPersistence(db).catch((err) => {
-  if (err.code === 'failed-precondition') {
-    console.warn('Firestore persistence unavailable: multiple tabs open')
-  } else if (err.code === 'unimplemented') {
-    console.warn('Firestore persistence not supported in this browser')
-  }
-})
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
+});
 
 // ══════════════════════════════════════════════════════════════════
 //  AUTHENTICATION
