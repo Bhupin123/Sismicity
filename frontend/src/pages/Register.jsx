@@ -166,7 +166,7 @@ export default function Register() {
       }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{ fontSize: 44, marginBottom: 6 }}>🌍</div>
+          <div style={{ fontSize: 44, marginBottom: 6 }}></div>
           <h1 style={{ color: '#00c8ff', fontSize: 30, margin: 0 }}>SeismoIQ</h1>
           <p style={{ color: '#5a7a99', fontSize: 13, marginTop: 4 }}>Create your account</p>
         </div>
@@ -199,7 +199,7 @@ export default function Register() {
         {/* Tabs */}
         <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid rgba(0,200,255,0.1)' }}>
           <button style={tabStyle('email')} onClick={() => switchTab('email')}>Email</button>
-          <button style={tabStyle('phone')} onClick={() => switchTab('phone')}>📱 Phone</button>
+          <button style={tabStyle('phone')} onClick={() => switchTab('phone')}> Phone</button>
         </div>
 
         {/* Error / Success */}
