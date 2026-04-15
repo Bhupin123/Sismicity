@@ -51,7 +51,7 @@ sys.path.insert(0, ML_MODELS_PATH)
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
-    "https://seismoiq.vercel.app",
+    "https://sismicity-zzdd.vercel.app",
 ]
 _frontend_url = os.environ.get("FRONTEND_URL", "")
 if _frontend_url:
