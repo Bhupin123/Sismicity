@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
+import {
+  getAuth,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
@@ -8,15 +8,18 @@ import {
   updateProfile,
   signInWithPopup,
   GoogleAuthProvider,
-  FacebookAuthProvider
+  sendPasswordResetEmail,
+  PhoneAuthProvider,
+  signInWithPhoneNumber,
+  RecaptchaVerifier,
 } from 'firebase/auth';
-import { 
+import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
-  doc, 
-  setDoc, 
-  getDoc, 
+  doc,
+  setDoc,
+  getDoc,
   collection,
   addDoc,
   query,
@@ -45,7 +48,50 @@ export const db = initializeFirestore(app, {
 });
 
 // ══════════════════════════════════════════════════════════════════
-//  AUTHENTICATION
+//  RECAPTCHA (required for phone auth)
+// ══════════════════════════════════════════════════════════════════
+
+export const setupRecaptcha = (containerId) => {
+  // Clear any existing verifier to avoid duplicate error
+  if (window.recaptchaVerifier) {
+    try { window.recaptchaVerifier.clear(); } catch (_) {}
+    window.recaptchaVerifier = null;
+  }
+  window.recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
+    size: 'invisible',
+    callback: () => {},
+    'expired-callback': () => {
+      window.recaptchaVerifier = null;
+    }
+  });
+  return window.recaptchaVerifier;
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  HELPER — ensure Firestore user doc exists for social/phone logins
+// ══════════════════════════════════════════════════════════════════
+
+const ensureUserDoc = async (user, extra = {}) => {
+  const ref = doc(db, 'users', user.uid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      email:          user.email || '',
+      displayName:    user.displayName || extra.displayName || '',
+      phone:          user.phoneNumber || '',
+      createdAt:      new Date().toISOString(),
+      alertsEnabled:  false,
+      alertMagnitude: 5.0,
+      alertRadius:    100,
+      userLat:        null,
+      userLon:        null,
+      ...extra
+    });
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  EMAIL / PASSWORD AUTH
 // ══════════════════════════════════════════════════════════════════
 
 export const registerUser = async (email, password, displayName) => {
@@ -56,6 +102,7 @@ export const registerUser = async (email, password, displayName) => {
     await setDoc(doc(db, 'users', user.uid), {
       email:          user.email,
       displayName:    displayName,
+      phone:          '',
       createdAt:      new Date().toISOString(),
       alertsEnabled:  false,
       alertMagnitude: 5.0,
@@ -65,7 +112,7 @@ export const registerUser = async (email, password, displayName) => {
     }, { merge: true });
     return { success: true, user };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: friendlyError(error.code) };
   }
 };
 
@@ -74,48 +121,75 @@ export const loginUser = async (email, password) => {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return { success: true, user: userCredential.user };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: friendlyError(error.code) };
   }
 };
 
-const ensureSocialUserDoc = async (user) => {
-  const ref = doc(db, 'users', user.uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      email:          user.email || '',
-      displayName:    user.displayName || '',
-      createdAt:      new Date().toISOString(),
-      alertsEnabled:  false,
-      alertMagnitude: 5.0,
-      alertRadius:    100,
-      userLat:        null,
-      userLon:        null,
-    });
+// ══════════════════════════════════════════════════════════════════
+//  FORGOT PASSWORD
+// ══════════════════════════════════════════════════════════════════
+
+export const resetPassword = async (email) => {
+  try {
+    await sendPasswordResetEmail(auth, email);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: friendlyError(error.code) };
   }
 };
+
+// ══════════════════════════════════════════════════════════════════
+//  GOOGLE AUTH
+// ══════════════════════════════════════════════════════════════════
 
 export const loginWithGoogle = async () => {
   try {
     const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
-    await ensureSocialUserDoc(result.user);
+    await ensureUserDoc(result.user);
     return { success: true, user: result.user };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: friendlyError(error.code) };
   }
 };
 
-export const loginWithFacebook = async () => {
+// ══════════════════════════════════════════════════════════════════
+//  PHONE AUTH — Step 1: Send OTP
+// ══════════════════════════════════════════════════════════════════
+
+export const sendPhoneOTP = async (phoneNumber, containerId) => {
   try {
-    const provider = new FacebookAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    await ensureSocialUserDoc(result.user);
-    return { success: true, user: result.user };
+    const appVerifier = setupRecaptcha(containerId);
+    const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+    // Store confirmationResult globally so verifyPhoneOTP can access it
+    window.confirmationResult = confirmationResult;
+    return { success: true };
   } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: friendlyError(error.code) };
   }
 };
+
+// ══════════════════════════════════════════════════════════════════
+//  PHONE AUTH — Step 2: Verify OTP
+// ══════════════════════════════════════════════════════════════════
+
+export const verifyPhoneOTP = async (otp) => {
+  try {
+    if (!window.confirmationResult) {
+      return { success: false, error: 'Session expired. Please request a new OTP.' };
+    }
+    const result = await window.confirmationResult.confirm(otp);
+    await ensureUserDoc(result.user);
+    window.confirmationResult = null;
+    return { success: true, user: result.user };
+  } catch (error) {
+    return { success: false, error: friendlyError(error.code) };
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════
+//  SIGN OUT
+// ══════════════════════════════════════════════════════════════════
 
 export const logoutUser = async () => {
   try {
@@ -186,7 +260,6 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
 
     return { success: true };
   } catch (error) {
-    console.error('subscribeToAlerts error:', error);
     return { success: false, error: error.message };
   }
 };
@@ -246,10 +319,38 @@ export const getUserHistory = async (userId, limit = 10) => {
   }
 };
 
+// ══════════════════════════════════════════════════════════════════
+//  FRIENDLY ERROR MESSAGES
+// ══════════════════════════════════════════════════════════════════
+
+function friendlyError(code) {
+  const map = {
+    'auth/invalid-email':            'Invalid email address.',
+    'auth/user-disabled':            'This account has been disabled.',
+    'auth/user-not-found':           'No account found with this email.',
+    'auth/wrong-password':           'Incorrect password.',
+    'auth/invalid-credential':       'Incorrect email or password.',
+    'auth/email-already-in-use':     'An account with this email already exists.',
+    'auth/weak-password':            'Password must be at least 6 characters.',
+    'auth/too-many-requests':        'Too many attempts. Please try again later.',
+    'auth/network-request-failed':   'Network error. Check your connection.',
+    'auth/popup-closed-by-user':     'Sign-in popup was closed.',
+    'auth/cancelled-popup-request':  'Another sign-in is in progress.',
+    'auth/invalid-phone-number':     'Invalid phone number. Use format: +1234567890',
+    'auth/invalid-verification-code':'Invalid OTP code. Please try again.',
+    'auth/code-expired':             'OTP has expired. Please request a new one.',
+    'auth/missing-phone-number':     'Please enter a phone number.',
+    'auth/quota-exceeded':           'SMS quota exceeded. Try again later.',
+  };
+  return map[code] || 'Something went wrong. Please try again.';
+}
+
 export default {
   auth, db,
   registerUser, loginUser, logoutUser, onAuthChange,
-  loginWithGoogle, loginWithFacebook,
+  loginWithGoogle,
+  sendPhoneOTP, verifyPhoneOTP,
+  resetPassword,
   getUserPreferences, updateUserPreferences,
   subscribeToAlerts, unsubscribeFromAlerts,
   saveEarthquakeView, getUserHistory
