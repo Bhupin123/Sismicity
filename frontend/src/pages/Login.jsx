@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { loginUser, loginWithGoogle, loginWithApple } from '../services/firebase'
+import { loginUser, loginWithGoogle, loginWithFacebook } from '../services/firebase'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 
@@ -13,9 +13,9 @@ const GoogleIcon = () => (
   </svg>
 )
 
-const AppleIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 814 1000" fill="#fff" style={{ flexShrink: 0 }}>
-    <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 490.8 24 360.5 24 235.4c0-106 37.2-162.3 111.4-215.4 62.4-45 132.7-57.8 202.3-57.8 96 0 163.6 37.3 219.5 37.3 54 0 138.8-40.7 220.9-40.7 16.6 0 109.1 1.9 166.3 73.4zm-240.5-180.3c28.3-35 50-83.7 50-132.4 0-6.4-.6-12.8-1.9-18.5-47.8 1.9-104.3 32-138.2 71.9-27.1 31.1-52.2 79.8-52.2 129.4 0 7.1 1.3 14.2 1.9 16.5 3.2.6 8.4 1.3 13.6 1.3 43 0 97.1-29 126.8-68.2z"/>
+const FacebookIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff" style={{ flexShrink: 0 }}>
+    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
   </svg>
 )
 
@@ -53,7 +53,7 @@ export default function Login() {
   const handleSocialLogin = async (provider) => {
     setError('')
     setSocialLoading(provider)
-    const fn = provider === 'google' ? loginWithGoogle : loginWithApple
+    const fn = provider === 'google' ? loginWithGoogle : loginWithFacebook
     const result = await fn()
     if (result.success) {
       setUser(result.user)
@@ -137,21 +137,20 @@ export default function Login() {
           </button>
 
           <button
-            onClick={() => handleSocialLogin('apple')}
+            onClick={() => handleSocialLogin('facebook')}
             disabled={!!socialLoading}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
               width: '100%', padding: '12px',
-              background: socialLoading === 'apple' ? '#333' : '#000',
-              border: '1px solid rgba(255,255,255,0.15)',
-              borderRadius: 8,
+              background: socialLoading === 'facebook' ? '#1455c0' : '#1877f2',
+              border: 'none', borderRadius: 8,
               color: '#fff', fontSize: 14, fontWeight: 600,
               cursor: socialLoading ? 'not-allowed' : 'pointer',
               transition: 'opacity 0.2s'
             }}
           >
-            <AppleIcon />
-            {socialLoading === 'apple' ? 'Connecting...' : 'Continue with Apple'}
+            <FacebookIcon />
+            {socialLoading === 'facebook' ? 'Connecting...' : 'Continue with Facebook'}
           </button>
         </div>
 

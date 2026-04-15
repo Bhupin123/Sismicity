@@ -5,7 +5,10 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  signInWithPopup,
+  GoogleAuthProvider,
+  FacebookAuthProvider
 } from 'firebase/auth';
 import { 
   getFirestore,
@@ -13,13 +16,14 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  updateDoc,
   collection,
   addDoc,
   query,
   where,
   getDocs
 } from 'firebase/firestore';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDewN-vqEEKOUwClI-WbF7Ghq4YKYiwMak",
@@ -35,8 +39,6 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db   = getFirestore(app);
 
-// ── Enable offline persistence so writes are instant even without network ──
-// Firestore caches writes locally and syncs when connected
 enableIndexedDbPersistence(db).catch((err) => {
   if (err.code === 'failed-precondition') {
     console.warn('Firestore persistence unavailable: multiple tabs open')
@@ -45,25 +47,24 @@ enableIndexedDbPersistence(db).catch((err) => {
   }
 })
 
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 //  AUTHENTICATION
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 
 export const registerUser = async (email, password, displayName) => {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
     await updateProfile(user, { displayName });
-    // setDoc with merge — never fails even if doc exists
     await setDoc(doc(db, 'users', user.uid), {
-      email: user.email,
-      displayName: displayName,
-      createdAt: new Date().toISOString(),
-      alertsEnabled: false,
+      email:          user.email,
+      displayName:    displayName,
+      createdAt:      new Date().toISOString(),
+      alertsEnabled:  false,
       alertMagnitude: 5.0,
-      alertRadius: 100,
-      userLat: null,
-      userLon: null,
+      alertRadius:    100,
+      userLat:        null,
+      userLon:        null,
     }, { merge: true });
     return { success: true, user };
   } catch (error) {
@@ -75,6 +76,45 @@ export const loginUser = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return { success: true, user: userCredential.user };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+const ensureSocialUserDoc = async (user) => {
+  const ref = doc(db, 'users', user.uid);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    await setDoc(ref, {
+      email:          user.email || '',
+      displayName:    user.displayName || '',
+      createdAt:      new Date().toISOString(),
+      alertsEnabled:  false,
+      alertMagnitude: 5.0,
+      alertRadius:    100,
+      userLat:        null,
+      userLon:        null,
+    });
+  }
+};
+
+export const loginWithGoogle = async () => {
+  try {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    await ensureSocialUserDoc(result.user);
+    return { success: true, user: result.user };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+};
+
+export const loginWithFacebook = async () => {
+  try {
+    const provider = new FacebookAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    await ensureSocialUserDoc(result.user);
+    return { success: true, user: result.user };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -93,9 +133,9 @@ export const onAuthChange = (callback) => {
   return onAuthStateChanged(auth, callback);
 };
 
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 //  USER PREFERENCES
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 
 export const getUserPreferences = async (userId) => {
   try {
@@ -123,16 +163,12 @@ export const updateUserPreferences = async (userId, preferences) => {
   }
 };
 
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 //  ALERT SUBSCRIPTIONS
-//  Uses setDoc with merge — with offline persistence enabled above,
-//  this writes to local IndexedDB instantly and syncs to server later.
-//  The UI resolves immediately regardless of network speed.
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 
 export const subscribeToAlerts = async (userId, alertSettings) => {
   try {
-    // This resolves from local cache instantly thanks to enableIndexedDbPersistence
     await setDoc(doc(db, 'users', userId), {
       alertsEnabled:  true,
       alertMagnitude: alertSettings.magnitude,
@@ -142,10 +178,9 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
       updatedAt:      new Date().toISOString()
     }, { merge: true });
 
-    // Non-blocking backend sync
     const user = auth.currentUser;
     if (user) {
-      fetch('http://localhost:8000/api/alerts/subscribe', {
+      fetch(`${API_URL}/api/alerts/subscribe`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ userId, email: user.email, ...alertSettings })
@@ -166,7 +201,7 @@ export const unsubscribeFromAlerts = async (userId) => {
       updatedAt:     new Date().toISOString()
     }, { merge: true });
 
-    fetch('http://localhost:8000/api/alerts/unsubscribe', {
+    fetch(`${API_URL}/api/alerts/unsubscribe`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ userId })
@@ -178,9 +213,9 @@ export const unsubscribeFromAlerts = async (userId) => {
   }
 };
 
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 //  EARTHQUAKE HISTORY
-// ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 
 export const saveEarthquakeView = async (userId, earthquake) => {
   try {
@@ -217,6 +252,7 @@ export const getUserHistory = async (userId, limit = 10) => {
 export default {
   auth, db,
   registerUser, loginUser, logoutUser, onAuthChange,
+  loginWithGoogle, loginWithFacebook,
   getUserPreferences, updateUserPreferences,
   subscribeToAlerts, unsubscribeFromAlerts,
   saveEarthquakeView, getUserHistory
