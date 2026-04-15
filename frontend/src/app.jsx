@@ -68,7 +68,7 @@ function AppLayout() {
   const handleLogout = async () => {
     await logoutUser()
     clearUser()
-    setNotification('👋 Logged out successfully')
+    setNotification(' Logged out successfully')
     navigate('/login')
   }
 
@@ -162,7 +162,7 @@ function AuthSplash() {
       justifyContent: 'center', background: '#0a1628',
       flexDirection: 'column', gap: 16,
     }}>
-      <div style={{ fontSize: 52 }}>🌍</div>
+      <div style={{ fontSize: 52 }}></div>
       <div style={{ color: '#00c8ff', fontSize: 18, fontWeight: 600 }}>Loading SeismoIQ...</div>
     </div>
   )
