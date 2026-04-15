@@ -3,19 +3,21 @@ import { useNavigate, Link } from 'react-router-dom'
 import { loginUser, loginWithGoogle, sendPhoneOTP, verifyPhoneOTP, resetPassword } from '../services/firebase'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
+import PhoneInput from 'react-phone-input-2'
+import 'react-phone-input-2/lib/style.css'
 
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
-    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
   </svg>
 )
 
 const PhoneIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
-    <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z"/>
+    <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z" />
   </svg>
 )
 
@@ -42,21 +44,21 @@ const labelStyle = {
 
 // Tabs: 'email' | 'phone' | 'forgot'
 export default function Login() {
-  const [tab, setTab]               = useState('email')
-  const [email, setEmail]           = useState('')
-  const [password, setPassword]     = useState('')
-  const [phone, setPhone]           = useState('')
-  const [otp, setOtp]               = useState('')
-  const [otpSent, setOtpSent]       = useState(false)
+  const [tab, setTab] = useState('email')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [phone, setPhone] = useState('')
+  const [otp, setOtp] = useState('')
+  const [otpSent, setOtpSent] = useState(false)
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotSent, setForgotSent] = useState(false)
-  const [loading, setLoading]       = useState(false)
+  const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const [error, setError]           = useState('')
-  const [success, setSuccess]       = useState('')
-  const navigate                    = useNavigate()
-  const setNotification             = useAppStore((s) => s.setNotification)
-  const setUser                     = useAuthStore((s) => s.setUser)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const navigate = useNavigate()
+  const setNotification = useAppStore((s) => s.setNotification)
+  const setUser = useAuthStore((s) => s.setUser)
 
   const switchTab = (t) => {
     setTab(t)
@@ -194,7 +196,7 @@ export default function Login() {
       }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{ fontSize: 44, marginBottom: 6 }}>🌍</div>
+          <div style={{ fontSize: 44, marginBottom: 6 }}></div>
           <h1 style={{ color: '#00c8ff', fontSize: 30, margin: 0 }}>SeismoIQ</h1>
           <p style={{ color: '#5a7a99', fontSize: 13, marginTop: 4 }}>Sign in to your account</p>
         </div>
@@ -226,9 +228,9 @@ export default function Login() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid rgba(0,200,255,0.1)' }}>
-          <button style={tabStyle('email')}   onClick={() => switchTab('email')}>Email</button>
-          <button style={tabStyle('phone')}   onClick={() => switchTab('phone')}>📱 Phone</button>
-          <button style={tabStyle('forgot')}  onClick={() => switchTab('forgot')}>Forgot?</button>
+          <button style={tabStyle('email')} onClick={() => switchTab('email')}>Email</button>
+          <button style={tabStyle('phone')} onClick={() => switchTab('phone')}> Phone</button>
+          <button style={tabStyle('forgot')} onClick={() => switchTab('forgot')}>Forgot?</button>
         </div>
 
         {/* Error / Success */}
@@ -293,13 +295,41 @@ export default function Login() {
               <form onSubmit={handleSendOTP}>
                 <div style={{ marginBottom: 8 }}>
                   <label style={labelStyle}>PHONE NUMBER</label>
-                  <input
-                    type="tel" value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    required placeholder="+1 234 567 8900" style={inputStyle}
+
+                  <PhoneInput
+                    country={'np'}
+                    value={phone}
+                    onChange={(value) => setPhone('+' + value)}
+
+                    containerStyle={{ width: '100%' }}
+
+                    inputStyle={{
+                      width: '100%',
+                      height: '44px',
+                      background: 'var(--raised)',
+                      border: '1px solid var(--bdr2)',
+                      borderRadius: 'var(--radius)',
+                      color: 'var(--txt)',
+                      fontSize: '14px',
+                      paddingLeft: '48px'
+                    }}
+
+                    buttonStyle={{
+                      background: 'var(--raised)',
+                      border: '1px solid var(--bdr2)',
+                      borderRadius: 'var(--radius)',
+                      borderRight: 'none'
+                    }}
+
+                    dropdownStyle={{
+                      background: 'var(--panel)',
+                      color: 'var(--txt)',
+                      border: '1px solid var(--border)'
+                    }}
                   />
-                  <p style={{ color: '#5a7a99', fontSize: 11, marginTop: 6, marginBottom: 0 }}>
-                    Include country code, e.g. +977 for Nepal
+
+                  <p style={{ color: '#5a7a99', fontSize: 11, marginTop: 6 }}>
+                    Include country code automatically
                   </p>
                 </div>
                 <div style={{ marginTop: 20 }}>
@@ -338,9 +368,11 @@ export default function Login() {
                   {loading ? 'Verifying...' : 'Verify OTP'}
                 </button>
                 <button type="button" onClick={() => { setOtpSent(false); setOtp(''); setSuccess(''); setError('') }}
-                  style={{ width: '100%', marginTop: 10, padding: '10px', background: 'transparent',
+                  style={{
+                    width: '100%', marginTop: 10, padding: '10px', background: 'transparent',
                     border: '1px solid rgba(0,200,255,0.2)', borderRadius: 8, color: '#5a7a99',
-                    fontSize: 13, cursor: 'pointer' }}>
+                    fontSize: 13, cursor: 'pointer'
+                  }}>
                   ← Change number / Resend
                 </button>
               </form>
@@ -376,7 +408,7 @@ export default function Login() {
               </form>
             ) : (
               <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                <div style={{ fontSize: 48, marginBottom: 12 }}>📧</div>
+                <div style={{ fontSize: 48, marginBottom: 12 }}></div>
                 <p style={{ color: '#00c864', fontSize: 14, marginBottom: 16 }}>
                   Reset link sent! Check your inbox and spam folder.
                 </p>
