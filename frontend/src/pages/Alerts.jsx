@@ -352,7 +352,7 @@ export default function Alerts() {
                 color: allSelected ? '#00c8ff' : '#5a7a99',
                 transition: 'all 0.2s', letterSpacing: '0.05em', textTransform: 'uppercase',
               }}>
-                {allSelected ? '✓ All' : 'Select All'}
+                {allSelected ? ' All' : 'Select All'}
               </button>
             </div>
 
@@ -374,7 +374,7 @@ export default function Alerts() {
                       border: `1.5px solid ${active ? m.color : 'rgba(255,255,255,0.1)'}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 8, color: '#000', fontWeight: 900, transition: 'all 0.18s',
-                    }}>{active ? '✓' : ''}</div>
+                    }}>{active ? '' : ''}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{ width: 8, height: 8, borderRadius: '50%', background: m.color, boxShadow: active ? `0 0 6px ${m.color}` : 'none', transition: 'box-shadow 0.18s', flexShrink: 0 }} />
                       <span style={{ color: active ? m.color : '#5a7a99', fontSize: 12, fontWeight: 700, transition: 'color 0.18s' }}>{m.label}</span>
@@ -471,7 +471,7 @@ export default function Alerts() {
               borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? '⟳ Detecting...' : '⊕ Use My Current Location'}
+              {geoLoading ? '⟳ Detecting...' : ' Use My Current Location'}
             </button>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {[{ label: 'Latitude', value: lat, fn: setLat }, { label: 'Longitude', value: lon, fn: setLon }].map(({ label, value, fn }) => (
@@ -508,7 +508,7 @@ export default function Alerts() {
               transition: 'background 0.3s',
               boxShadow: canSave ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
             }}>
-              {btnState === 'saved' ? '✓ Saved!' : subscribed ? '↻ Update Settings' : ' Enable Alerts'}
+              {btnState === 'saved' ? ' Saved!' : subscribed ? ' Update Settings' : ' Enable Alerts'}
             </button>
             {subscribed && (
               <button onClick={handleDisable} style={{
@@ -516,7 +516,7 @@ export default function Alerts() {
                 border: '1px solid rgba(255,80,80,0.4)', borderRadius: 10,
                 color: '#ff6060', fontSize: 13, fontWeight: 600, cursor: 'pointer',
               }}>
-                ✕ Disable Alerts
+                 Disable Alerts
               </button>
             )}
           </div>
