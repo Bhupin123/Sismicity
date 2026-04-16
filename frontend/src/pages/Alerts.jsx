@@ -2,69 +2,174 @@ import React, { useState, useEffect } from 'react'
 import { useAuthStore } from '../store/useAuthStore'
 import { subscribeToAlerts, unsubscribeFromAlerts, getUserPreferences } from '../services/firebase'
 
+/* ── Primitives ─────────────────────────────────────────────────── */
 const Card = ({ children, style = {} }) => (
   <div style={{
     background: '#0d1b2a', border: '1px solid rgba(0,200,255,0.12)',
-    borderRadius: 14, padding: '20px', ...style
+    borderRadius: 14, padding: '20px', ...style,
   }}>{children}</div>
 )
 
-const SLabel = ({ children }) => (
+const SLabel = ({ children, style = {} }) => (
   <div style={{
     color: '#5a7a99', fontSize: 11, fontWeight: 700,
-    letterSpacing: '0.1em', marginBottom: 8, textTransform: 'uppercase'
+    letterSpacing: '0.1em', marginBottom: 8,
+    textTransform: 'uppercase', ...style,
   }}>{children}</div>
 )
 
-const RangeSlider = ({ label, value, min, max, step, onChange, unit, color }) => (
-  <div style={{ marginBottom: 20 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-      <SLabel>{label}</SLabel>
-      <span style={{ color, fontSize: 18, fontWeight: 700, fontFamily: 'monospace' }}>
-        {value}{unit}
-      </span>
-    </div>
-    <input type="range" min={min} max={max} step={step} value={value}
-      onChange={e => onChange(Number(e.target.value))}
-      style={{ width: '100%', accentColor: color, cursor: 'pointer' }} />
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-      <span style={{ color: '#3a5a79', fontSize: 11 }}>{min}{unit}</span>
-      <span style={{ color: '#3a5a79', fontSize: 11 }}>{max}{unit}</span>
-    </div>
-  </div>
-)
-
+/* ── Magnitude data ─────────────────────────────────────────────── */
 const MAG_LEVELS = [
-  { label: 'Minor',    color: '#4fc3f7', desc: 'Felt slightly',     min: 2.0, max: 3.9, range: '2.0–3.9' },
-  { label: 'Light',    color: '#81c784', desc: 'Felt by many',       min: 4.0, max: 4.9, range: '4.0–4.9' },
-  { label: 'Moderate', color: '#ffb74d', desc: 'Slight damage',      min: 5.0, max: 5.9, range: '5.0–5.9' },
-  { label: 'Strong',   color: '#ff8a65', desc: 'Significant damage', min: 6.0, max: 6.9, range: '6.0–6.9' },
-  { label: 'Major',    color: '#ef5350', desc: 'Widespread damage',  min: 7.0, max: 99,  range: '7.0+'   },
+  { label: 'Minor',    color: '#4fc3f7', bg: 'rgba(79,195,247,0.08)',   border: 'rgba(79,195,247,0.35)',   desc: 'Felt slightly',    range: '2.0–3.9' },
+  { label: 'Light',    color: '#81c784', bg: 'rgba(129,199,132,0.08)',  border: 'rgba(129,199,132,0.35)',  desc: 'Felt by many',     range: '4.0–4.9' },
+  { label: 'Moderate', color: '#ffb74d', bg: 'rgba(255,183,77,0.08)',   border: 'rgba(255,183,77,0.35)',   desc: 'Slight damage',    range: '5.0–5.9' },
+  { label: 'Strong',   color: '#ff8a65', bg: 'rgba(255,138,101,0.08)',  border: 'rgba(255,138,101,0.35)',  desc: 'Significant dmg',  range: '6.0–6.9' },
+  { label: 'Major',    color: '#ef5350', bg: 'rgba(239,83,80,0.08)',    border: 'rgba(239,83,80,0.35)',    desc: 'Widespread dmg',   range: '7.0+' },
 ]
 
-const LS_KEY  = (uid) => `seismoiq_prefs_${uid}`
-const saveLocal = (uid, data) => { try { localStorage.setItem(LS_KEY(uid), JSON.stringify(data)) } catch {} }
-const loadLocal = (uid) => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
+/* ── Radius presets ─────────────────────────────────────────────── */
+const RADIUS_PRESETS = [
+  { label: '50 km',   value: 50,   desc: 'Local' },
+  { label: '100 km',  value: 100,  desc: 'City' },
+  { label: '200 km',  value: 200,  desc: 'Regional' },
+  { label: '500 km',  value: 500,  desc: 'Country' },
+  { label: '1000 km', value: 1000, desc: 'Continental' },
+]
+
+/* ── Storage helpers ────────────────────────────────────────────── */
+const LS_KEY    = (uid) => `seismoiq_prefs_${uid}`
+const saveLocal = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.stringify(d)) } catch {} }
+const loadLocal = (uid)   => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
 
 const DEFAULTS = {
   alertsEnabled: false, alertMagnitude: 5.0,
-  alertRadius: 200,     userLat: 27.7172, userLon: 85.3240,
+  selectedMagnitudes: ['Moderate', 'Strong', 'Major'],
+  alertRadius: 200, userLat: 27.7172, userLon: 85.3240,
 }
 
+/* ── Sidebar badge (export for sidebar) ────────────────────────── */
+export const AlertsNavBadge = ({ subscribed, selectedCount }) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: 5,
+    padding: '2px 8px 2px 6px', borderRadius: 20,
+    background: subscribed ? 'rgba(0,200,100,0.13)' : 'rgba(255,80,80,0.10)',
+    border: `1px solid ${subscribed ? 'rgba(0,200,100,0.35)' : 'rgba(255,80,80,0.25)'}`,
+    fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+    color: subscribed ? '#00cc77' : '#ff6060', transition: 'all 0.3s',
+  }}>
+    <span style={{
+      width: 6, height: 6, borderRadius: '50%',
+      background: subscribed ? '#00cc77' : '#ff6060',
+      boxShadow: subscribed ? '0 0 6px #00cc77' : 'none',
+      animation: subscribed ? 'pulse 2s infinite' : 'none', flexShrink: 0,
+    }} />
+    {subscribed ? (selectedCount > 0 ? `${selectedCount} active` : 'ON') : 'OFF'}
+  </div>
+)
+
+/* ── Alert Summary Card ─────────────────────────────────────────── */
+const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
+  const areaKm2 = Math.round(Math.PI * radius * radius)
+  const highestRisk = [...selectedMagnitudes].sort((a, b) => {
+    const order = ['Minor', 'Light', 'Moderate', 'Strong', 'Major']
+    return order.indexOf(b) - order.indexOf(a)
+  })[0]
+  const riskMag = MAG_LEVELS.find(m => m.label === highestRisk)
+
+  return (
+    <Card style={{ position: 'relative', overflow: 'hidden' }}>
+      {/* Decorative rings */}
+      <div style={{ position: 'absolute', top: -30, right: -30, width: 120, height: 120, borderRadius: '50%', border: `1px solid ${subscribed ? 'rgba(0,200,100,0.1)' : 'rgba(0,200,255,0.07)'}`, pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', top: -10, right: -10, width: 80, height: 80, borderRadius: '50%', border: `1px solid ${subscribed ? 'rgba(0,200,100,0.07)' : 'rgba(0,200,255,0.05)'}`, pointerEvents: 'none' }} />
+
+      <SLabel>Alert Summary</SLabel>
+
+      {/* Status pill */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 12px', borderRadius: 8, marginBottom: 14,
+        background: subscribed ? 'rgba(0,180,90,0.07)' : 'rgba(255,60,60,0.07)',
+        border: `1px solid ${subscribed ? 'rgba(0,180,90,0.2)' : 'rgba(255,60,60,0.2)'}`,
+      }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+          background: subscribed ? '#00cc77' : '#ff5555',
+          boxShadow: subscribed ? '0 0 8px #00cc77' : 'none',
+          animation: subscribed ? 'pulse 2s infinite' : 'none',
+        }} />
+        <span style={{ color: subscribed ? '#00cc77' : '#ff5555', fontWeight: 700, fontSize: 12 }}>
+          {subscribed ? 'Monitoring Active' : 'Not Monitoring'}
+        </span>
+      </div>
+
+      {/* Stats 2×2 grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+        {[
+          { label: 'Levels Watched', value: selectedMagnitudes.length > 0 ? `${selectedMagnitudes.length} / 5` : '—', color: '#00c8ff' },
+          { label: 'Radius',         value: `${radius} km`,   color: '#a78bfa' },
+          { label: 'Coverage Area',  value: `~${areaKm2.toLocaleString()} km²`, color: '#81c784' },
+          { label: 'Highest Risk',   value: highestRisk || '—', color: riskMag?.color || '#5a7a99' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)',
+          }}>
+            <div style={{ color: '#3a5a79', fontSize: 10, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</div>
+            <div style={{ color, fontSize: 14, fontWeight: 700, fontFamily: 'monospace' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Active level tags */}
+      {selectedMagnitudes.length > 0 ? (
+        <div>
+          <div style={{ color: '#3a5a79', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Watching</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {selectedMagnitudes.map(label => {
+              const m = MAG_LEVELS.find(x => x.label === label)
+              return m ? (
+                <div key={label} style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px', borderRadius: 20,
+                  background: m.bg, border: `1px solid ${m.border}`,
+                  fontSize: 11, fontWeight: 600, color: m.color,
+                }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: m.color, flexShrink: 0 }} />
+                  {m.label}
+                </div>
+              ) : null
+            })}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          padding: '10px', borderRadius: 8, textAlign: 'center',
+          background: 'rgba(255,80,80,0.06)', border: '1px solid rgba(255,80,80,0.15)',
+          color: '#ff6060', fontSize: 11,
+        }}>
+          ⚠ No magnitude levels selected
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/* ── Main Component ─────────────────────────────────────────────── */
 export default function Alerts() {
   const user = useAuthStore((s) => s.user)
   const uid  = user?.uid
   const local = uid ? (loadLocal(uid) || DEFAULTS) : DEFAULTS
 
-  const [subscribed, setSubscribed] = useState(local.alertsEnabled)
-  const [magnitude,  setMagnitude]  = useState(local.alertMagnitude)
-  const [radius,     setRadius]     = useState(local.alertRadius)
-  const [lat,        setLat]        = useState(local.userLat ?? DEFAULTS.userLat)
-  const [lon,        setLon]        = useState(local.userLon ?? DEFAULTS.userLon)
-  const [geoLoading, setGeoLoading] = useState(false)
-  const [toast,      setToast]      = useState(null)
-  const [btnState,   setBtnState]   = useState('idle')
-  const [syncing,    setSyncing]    = useState(false)
+  const [subscribed,         setSubscribed]         = useState(local.alertsEnabled)
+  const [magnitude,          setMagnitude]          = useState(local.alertMagnitude)
+  const [selectedMagnitudes, setSelectedMagnitudes] = useState(local.selectedMagnitudes ?? DEFAULTS.selectedMagnitudes)
+  const [radius,             setRadius]             = useState(local.alertRadius)
+  const [lat,                setLat]                = useState(local.userLat ?? DEFAULTS.userLat)
+  const [lon,                setLon]                = useState(local.userLon ?? DEFAULTS.userLon)
+  const [geoLoading,         setGeoLoading]         = useState(false)
+  const [toast,              setToast]              = useState(null)
+  const [btnState,           setBtnState]           = useState('idle')
+  const [syncing,            setSyncing]            = useState(false)
 
   useEffect(() => {
     if (!uid) return
@@ -72,16 +177,18 @@ export default function Alerts() {
     getUserPreferences(uid).then(res => {
       if (res.success && res.data) {
         const d = res.data
-        const prefs = {
-          alertsEnabled:  !!d.alertsEnabled,
-          alertMagnitude: d.alertMagnitude ?? DEFAULTS.alertMagnitude,
-          alertRadius:    d.alertRadius    ?? DEFAULTS.alertRadius,
-          userLat:        d.userLat        ?? DEFAULTS.userLat,
-          userLon:        d.userLon        ?? DEFAULTS.userLon,
+        const p = {
+          alertsEnabled:      !!d.alertsEnabled,
+          alertMagnitude:     d.alertMagnitude     ?? DEFAULTS.alertMagnitude,
+          selectedMagnitudes: d.selectedMagnitudes ?? DEFAULTS.selectedMagnitudes,
+          alertRadius:        d.alertRadius        ?? DEFAULTS.alertRadius,
+          userLat:            d.userLat            ?? DEFAULTS.userLat,
+          userLon:            d.userLon            ?? DEFAULTS.userLon,
         }
-        setSubscribed(prefs.alertsEnabled); setMagnitude(prefs.alertMagnitude)
-        setRadius(prefs.alertRadius); setLat(prefs.userLat); setLon(prefs.userLon)
-        saveLocal(uid, prefs)
+        setSubscribed(p.alertsEnabled); setMagnitude(p.alertMagnitude)
+        setSelectedMagnitudes(p.selectedMagnitudes); setRadius(p.alertRadius)
+        setLat(p.userLat); setLon(p.userLon)
+        saveLocal(uid, p)
       }
     }).catch(() => {}).finally(() => setSyncing(false))
   }, [uid])
@@ -89,6 +196,16 @@ export default function Alerts() {
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type }); setTimeout(() => setToast(null), 3500)
   }
+
+  const toggleMagnitude = (label) =>
+    setSelectedMagnitudes(prev =>
+      prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]
+    )
+
+  const handleSelectAll = () =>
+    setSelectedMagnitudes(
+      selectedMagnitudes.length === MAG_LEVELS.length ? [] : MAG_LEVELS.map(m => m.label)
+    )
 
   const handleGetLocation = () => {
     if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return }
@@ -104,12 +221,13 @@ export default function Alerts() {
   }
 
   const handleSave = () => {
-    if (!uid) { showToast('Not logged in', 'error'); return }
-    const prefs = { alertsEnabled: true, alertMagnitude: magnitude, alertRadius: radius, userLat: lat, userLon: lon }
+    if (!uid)                       { showToast('Not logged in', 'error'); return }
+    if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
+    const prefs = { alertsEnabled: true, alertMagnitude: magnitude, selectedMagnitudes, alertRadius: radius, userLat: lat, userLon: lon }
     setSubscribed(true); setBtnState('saved'); setTimeout(() => setBtnState('idle'), 2500)
-    showToast(`Alerts enabled! M${magnitude}+ within ${radius}km`)
+    showToast(`Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
     saveLocal(uid, prefs)
-    subscribeToAlerts(uid, { magnitude, radius, lat, lon }).catch(err => console.warn('Firestore sync failed:', err))
+    subscribeToAlerts(uid, { magnitude, selectedMagnitudes, radius, lat, lon }).catch(err => console.warn('Firestore sync failed:', err))
   }
 
   const handleDisable = () => {
@@ -119,7 +237,9 @@ export default function Alerts() {
     unsubscribeFromAlerts(uid).catch(() => {})
   }
 
-  const activeMag = MAG_LEVELS.find(m => magnitude >= m.min && magnitude <= m.max) || MAG_LEVELS[4]
+  const allSelected  = selectedMagnitudes.length === MAG_LEVELS.length
+  const canSave      = selectedMagnitudes.length > 0
+  const activePreset = RADIUS_PRESETS.find(p => p.value === radius)
 
   const inputStyle = {
     width: '100%', padding: '10px 12px', background: '#0a1628',
@@ -130,26 +250,31 @@ export default function Alerts() {
 
   return (
     <div style={{ padding: '4px 0', maxWidth: 900, margin: '0 auto' }}>
+      <style>{`
+        @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes toastIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+        .mag-chip:hover  { transform:translateY(-2px); filter:brightness(1.12); }
+        .mag-chip:active { transform:scale(0.97); }
+        .rad-btn:hover   { transform:translateY(-1px); filter:brightness(1.1); }
+        .rad-btn:active  { transform:scale(0.96); }
+        .mag-chip, .rad-btn { transition: all 0.16s ease !important; }
+      `}</style>
 
       {/* Toast */}
       {toast && (
         <div style={{
           position: 'fixed', top: 16, right: 16, zIndex: 9999,
-          padding: '12px 18px', borderRadius: 10,
+          padding: '12px 18px', borderRadius: 10, maxWidth: 280,
           background: toast.type === 'error' ? '#881111' : '#005522',
           color: '#fff', fontSize: 13, fontWeight: 600,
           boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-          maxWidth: 280,
-        }}>
-          {toast.msg}
-        </div>
+          animation: 'toastIn 0.25s ease',
+        }}>{toast.msg}</div>
       )}
 
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
-        <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>
-           Alert Settings
-        </h1>
+        <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Alert Settings</h1>
         <p style={{ color: '#5a7a99', fontSize: 13, margin: 0 }}>
           Settings saved to your account
           {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing...</span>}
@@ -165,35 +290,41 @@ export default function Alerts() {
       }}>
         <div>
           <div style={{ color: subscribed ? '#00cc77' : '#ff5555', fontWeight: 700, fontSize: 13 }}>
-            {subscribed ? ' Alerts Active' : ' Alerts Disabled'}
+            {subscribed ? '● Alerts Active' : '● Alerts Disabled'}
           </div>
           <div style={{ color: '#5a7a99', fontSize: 11, marginTop: 2 }}>
             {subscribed
-              ? `M${magnitude}+ within ${radius}km of (${lat}, ${lon})`
+              ? `${selectedMagnitudes.join(', ')} · ${radius} km radius · (${lat}, ${lon})`
               : 'Configure settings and click Enable Alerts'}
           </div>
         </div>
-        <div style={{
-          padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700,
-          background: subscribed ? 'rgba(0,180,90,0.15)' : 'rgba(255,60,60,0.15)',
-          color: subscribed ? '#00cc77' : '#ff5555',
-        }}>
-          {subscribed ? 'ACTIVE' : 'INACTIVE'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {subscribed && selectedMagnitudes.map(label => {
+            const m = MAG_LEVELS.find(x => x.label === label)
+            return m ? <div key={label} style={{ width: 8, height: 8, borderRadius: '50%', background: m.color, boxShadow: `0 0 5px ${m.color}` }} /> : null
+          })}
+          <div style={{
+            padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+            background: subscribed ? 'rgba(0,180,90,0.15)' : 'rgba(255,60,60,0.15)',
+            color: subscribed ? '#00cc77' : '#ff5555',
+          }}>
+            {subscribed ? 'ACTIVE' : 'INACTIVE'}
+          </div>
         </div>
       </div>
 
-      {/* Main grid — stacks on mobile */}
+      {/* Main grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
 
-        {/* Left column */}
+        {/* LEFT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Email */}
           <Card>
             <SLabel>Notification Email</SLabel>
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '10px 14px', borderRadius: 8,
-              background: 'rgba(0,200,255,0.05)',
-              border: '1px solid rgba(0,200,255,0.15)',
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8,
+              background: 'rgba(0,200,255,0.05)', border: '1px solid rgba(0,200,255,0.15)',
             }}>
               <div style={{
                 width: 30, height: 30, borderRadius: '50%',
@@ -204,53 +335,143 @@ export default function Alerts() {
                 {(user?.displayName || user?.email || 'U')[0].toUpperCase()}
               </div>
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: '#e0e8f0', fontSize: 13, fontWeight: 600 }}>
-                  {user?.displayName || 'User'}
-                </div>
-                <div style={{ color: '#5a7a99', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {user?.email}
-                </div>
+                <div style={{ color: '#e0e8f0', fontSize: 13, fontWeight: 600 }}>{user?.displayName || 'User'}</div>
+                <div style={{ color: '#5a7a99', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</div>
               </div>
             </div>
           </Card>
 
+          {/* Magnitude multi-select */}
           <Card>
-            <RangeSlider label="Minimum Magnitude" value={magnitude}
-              min={2} max={8} step={0.5} onChange={setMagnitude} unit="" color="#00c8ff" />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <SLabel style={{ marginBottom: 0 }}>Alert Magnitude Levels</SLabel>
+              <button onClick={handleSelectAll} style={{
+                padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                border: '1px solid rgba(0,200,255,0.3)',
+                background: allSelected ? 'rgba(0,200,255,0.15)' : 'transparent',
+                color: allSelected ? '#00c8ff' : '#5a7a99',
+                transition: 'all 0.2s', letterSpacing: '0.05em', textTransform: 'uppercase',
+              }}>
+                {allSelected ? '✓ All' : 'Select All'}
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {MAG_LEVELS.map(m => {
+                const active = selectedMagnitudes.includes(m.label)
+                return (
+                  <button key={m.label} className="mag-chip" onClick={() => toggleMagnitude(m.label)} style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                    gap: 4, padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                    border: `1.5px solid ${active ? m.border : 'rgba(255,255,255,0.06)'}`,
+                    background: active ? m.bg : 'rgba(255,255,255,0.02)',
+                    boxShadow: active ? `0 0 12px ${m.color}18` : 'none',
+                    textAlign: 'left', position: 'relative', overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      position: 'absolute', top: 7, right: 8, width: 14, height: 14, borderRadius: '50%',
+                      background: active ? m.color : 'rgba(255,255,255,0.08)',
+                      border: `1.5px solid ${active ? m.color : 'rgba(255,255,255,0.1)'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 8, color: '#000', fontWeight: 900, transition: 'all 0.18s',
+                    }}>{active ? '✓' : ''}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: m.color, boxShadow: active ? `0 0 6px ${m.color}` : 'none', transition: 'box-shadow 0.18s', flexShrink: 0 }} />
+                      <span style={{ color: active ? m.color : '#5a7a99', fontSize: 12, fontWeight: 700, transition: 'color 0.18s' }}>{m.label}</span>
+                    </div>
+                    <div style={{ color: active ? '#8ab4cc' : '#3a5a79', fontSize: 10, fontFamily: 'monospace', paddingLeft: 14 }}>M {m.range}</div>
+                    <div style={{ color: active ? '#6a9ab8' : '#2e4a60', fontSize: 10, paddingLeft: 14 }}>{m.desc}</div>
+                  </button>
+                )
+              })}
+            </div>
+
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '8px 12px', borderRadius: 8,
-              background: `${activeMag.color}12`,
-              border: `1px solid ${activeMag.color}35`,
+              marginTop: 12, padding: '8px 12px', borderRadius: 8,
+              background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: activeMag.color }} />
-              <span style={{ color: activeMag.color, fontWeight: 700, fontSize: 12 }}>{activeMag.label}</span>
-              <span style={{ color: '#5a7a99', fontSize: 11 }}>— {activeMag.desc}</span>
+              <span style={{ color: '#5a7a99', fontSize: 11 }}>
+                {selectedMagnitudes.length === 0 ? 'No levels selected' : `${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} selected`}
+              </span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {MAG_LEVELS.map(m => (
+                  <div key={m.label} style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: selectedMagnitudes.includes(m.label) ? m.color : 'rgba(255,255,255,0.08)',
+                    boxShadow: selectedMagnitudes.includes(m.label) ? `0 0 4px ${m.color}` : 'none',
+                    transition: 'all 0.2s',
+                  }} />
+                ))}
+              </div>
             </div>
           </Card>
 
+          {/* Alert Radius — presets */}
           <Card>
-            <RangeSlider label="Alert Radius" value={radius}
-              min={50} max={1000} step={50} onChange={setRadius} unit=" km" color="#a78bfa" />
-            <p style={{ color: '#3a5a79', fontSize: 11, margin: 0 }}>
-              Earthquakes within this distance will trigger alerts.
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <SLabel style={{ marginBottom: 0 }}>Alert Radius</SLabel>
+              <span style={{ color: '#a78bfa', fontSize: 18, fontWeight: 700, fontFamily: 'monospace' }}>
+                {radius} km
+                {activePreset && (
+                  <span style={{ color: '#5a7a99', fontSize: 10, fontWeight: 400, marginLeft: 6 }}>· {activePreset.desc}</span>
+                )}
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+              {RADIUS_PRESETS.map((p, i) => {
+                const active = radius === p.value
+                const ringSize = 18 + i * 5
+                return (
+                  <button key={p.value} className="rad-btn" onClick={() => setRadius(p.value)} style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+                    padding: '10px 4px', borderRadius: 10, cursor: 'pointer',
+                    border: `1.5px solid ${active ? 'rgba(167,139,250,0.5)' : 'rgba(255,255,255,0.06)'}`,
+                    background: active ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.02)',
+                    boxShadow: active ? '0 0 14px rgba(167,139,250,0.15)' : 'none',
+                  }}>
+                    <div style={{
+                      width: ringSize, height: ringSize, borderRadius: '50%',
+                      border: `1.5px solid ${active ? '#a78bfa' : 'rgba(167,139,250,0.2)'}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      transition: 'all 0.15s', flexShrink: 0,
+                    }}>
+                      <div style={{
+                        width: 4, height: 4, borderRadius: '50%',
+                        background: active ? '#a78bfa' : 'rgba(167,139,250,0.25)',
+                        boxShadow: active ? '0 0 6px #a78bfa' : 'none',
+                      }} />
+                    </div>
+                    <span style={{ color: active ? '#a78bfa' : '#5a7a99', fontSize: 9, fontWeight: 700, fontFamily: 'monospace', transition: 'color 0.15s', textAlign: 'center' }}>
+                      {p.label}
+                    </span>
+                    <span style={{ color: active ? '#7a6ab8' : '#2e4a60', fontSize: 9, transition: 'color 0.15s' }}>
+                      {p.desc}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            <p style={{ color: '#3a5a79', fontSize: 11, margin: '12px 0 0' }}>
+              Earthquakes within this distance from your location will trigger alerts.
             </p>
           </Card>
         </div>
 
-        {/* Right column */}
+        {/* RIGHT */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Location */}
           <Card>
             <SLabel>Your Location</SLabel>
             <button onClick={handleGetLocation} disabled={geoLoading} style={{
               width: '100%', padding: '10px',
-              background: 'rgba(0,200,255,0.08)',
-              border: '1px solid rgba(0,200,255,0.25)',
-              borderRadius: 8, color: '#00c8ff',
-              fontSize: 13, fontWeight: 600,
+              background: 'rgba(0,200,255,0.08)', border: '1px solid rgba(0,200,255,0.25)',
+              borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? '⟳ Detecting...' : ' Use My Current Location'}
+              {geoLoading ? '⟳ Detecting...' : '⊕ Use My Current Location'}
             </button>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {[{ label: 'Latitude', value: lat, fn: setLat }, { label: 'Longitude', value: lon, fn: setLon }].map(({ label, value, fn }) => (
@@ -265,24 +486,12 @@ export default function Alerts() {
             <p style={{ color: '#3a5a79', fontSize: 11, margin: '8px 0 0' }}>Default: Kathmandu, Nepal</p>
           </Card>
 
-          <Card>
-            <SLabel>Magnitude Scale Reference</SLabel>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {MAG_LEVELS.map(m => (
-                <div key={m.label} style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '7px 10px', borderRadius: 6,
-                  background: activeMag.label === m.label ? `${m.color}14` : 'transparent',
-                  border: `1px solid ${activeMag.label === m.label ? m.color + '50' : m.color + '18'}`,
-                }}>
-                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: m.color, flexShrink: 0 }} />
-                  <span style={{ color: '#5a7a99', fontSize: 10, fontFamily: 'monospace', width: 64 }}>M {m.range}</span>
-                  <span style={{ color: m.color, fontSize: 11, fontWeight: 700, width: 60 }}>{m.label}</span>
-                  <span style={{ color: '#3a5a79', fontSize: 10 }}>{m.desc}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
+          {/* Alert Summary (replaces magnitude reference) */}
+          <AlertSummaryCard
+            subscribed={subscribed}
+            selectedMagnitudes={selectedMagnitudes}
+            radius={radius}
+          />
 
           {/* Action buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -290,22 +499,24 @@ export default function Alerts() {
               width: '100%', padding: '14px', border: 'none', borderRadius: 10,
               background: btnState === 'saved'
                 ? 'linear-gradient(135deg,#00aa55,#007733)'
-                : 'linear-gradient(135deg,#00c8ff,#0077aa)',
-              color: '#fff', fontSize: 14, fontWeight: 700,
-              cursor: 'pointer', transition: 'background 0.3s',
-              boxShadow: '0 4px 16px rgba(0,200,255,0.2)',
+                : !canSave
+                  ? 'rgba(255,255,255,0.05)'
+                  : 'linear-gradient(135deg,#00c8ff,#0077aa)',
+              color: !canSave ? '#3a5a79' : '#fff',
+              fontSize: 14, fontWeight: 700,
+              cursor: !canSave ? 'not-allowed' : 'pointer',
+              transition: 'background 0.3s',
+              boxShadow: canSave ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
             }}>
-              {btnState === 'saved' ? '✓ Saved!' : subscribed ? '↻ Update Settings' : ' Enable Alerts'}
+              {btnState === 'saved' ? '✓ Saved!' : subscribed ? '↻ Update Settings' : '⚡ Enable Alerts'}
             </button>
             {subscribed && (
               <button onClick={handleDisable} style={{
-                width: '100%', padding: '12px',
-                background: 'transparent',
-                border: '1px solid rgba(255,80,80,0.4)',
-                borderRadius: 10, color: '#ff6060',
-                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                width: '100%', padding: '12px', background: 'transparent',
+                border: '1px solid rgba(255,80,80,0.4)', borderRadius: 10,
+                color: '#ff6060', fontSize: 13, fontWeight: 600, cursor: 'pointer',
               }}>
-                 Disable Alerts
+                ✕ Disable Alerts
               </button>
             )}
           </div>
