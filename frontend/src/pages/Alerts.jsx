@@ -508,7 +508,7 @@ export default function Alerts() {
               transition: 'background 0.3s',
               boxShadow: canSave ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
             }}>
-              {btnState === 'saved' ? '✓ Saved!' : subscribed ? '↻ Update Settings' : '⚡ Enable Alerts'}
+              {btnState === 'saved' ? '✓ Saved!' : subscribed ? '↻ Update Settings' : ' Enable Alerts'}
             </button>
             {subscribed && (
               <button onClick={handleDisable} style={{
