@@ -6,14 +6,31 @@ import { Panel } from '../components/UI'
 import { SeismoBarChart } from '../components/Charts'
 import FilterBar from '../components/FilterBar'
 
+function useMapHeight() {
+  const getHeight = () => {
+    const w = window.innerWidth
+    if (w < 480) return 240
+    if (w < 640) return 300
+    if (w < 900) return 380
+    return 480
+  }
+  const [height, setHeight] = useState(getHeight)
+
+  useEffect(() => {
+    const handler = () => setHeight(getHeight())
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
+
+  return height
+}
+
 export default function MapView() {
-  const { params } = useFilters()
+  const { params }  = useFilters()
+  const mapHeight   = useMapHeight()
   const [events,    setEvents]    = useState([])
   const [locations, setLocations] = useState([])
   const [loading,   setLoading]   = useState(true)
-
-  // Responsive map height
-  const mapHeight = window.innerWidth < 640 ? 260 : window.innerWidth < 900 ? 340 : 480
 
   useEffect(() => {
     setLoading(true)
@@ -31,7 +48,7 @@ export default function MapView() {
     <>
       <FilterBar />
 
-      <Panel title=" Earthquake Epicenters" badge={`${events.length.toLocaleString()} EVENTS`}>
+      <Panel title="Earthquake Epicenters" badge={`${events.length.toLocaleString()} EVENTS`}>
         {loading
           ? <div className="spinner" />
           : <EarthquakeMap events={events} height={mapHeight} />
@@ -39,13 +56,25 @@ export default function MapView() {
       </Panel>
 
       <div className="grid-2" style={{ marginTop: 16 }}>
-        <Panel title=" Top Locations by Count" badge="FREQUENCY">
-          <SeismoBarChart data={locations} dataKey="count" xKey="place"
-            color="#00c8ff" height={220} horizontal />
+        <Panel title="Top Locations by Count" badge="FREQUENCY">
+          <SeismoBarChart
+            data={locations}
+            dataKey="count"
+            xKey="place"
+            color="#00c8ff"
+            height={220}
+            horizontal
+          />
         </Panel>
-        <Panel title=" Top Locations by Max Magnitude" badge="INTENSITY">
-          <SeismoBarChart data={locations} dataKey="max_mag" xKey="place"
-            color="#ff3d3d" height={220} horizontal />
+        <Panel title="Top Locations by Max Magnitude" badge="INTENSITY">
+          <SeismoBarChart
+            data={locations}
+            dataKey="max_mag"
+            xKey="place"
+            color="#ff3d3d"
+            height={220}
+            horizontal
+          />
         </Panel>
       </div>
     </>
