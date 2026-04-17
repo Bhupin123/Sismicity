@@ -48,9 +48,7 @@ const DEFAULTS = {
 }
 
 /* ── localStorage helpers ───────────────────────────────────────── */
-// localStorage is a same-device speed cache ONLY.
-// Firestore is always master — it overwrites cache on every load.
-const LS_KEY    = (uid) => `seismoiq_prefs_v2_${uid}` // v2 key avoids stale old cache
+const LS_KEY    = (uid) => `seismoiq_prefs_v2_${uid}`
 const saveLocal = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.stringify(d)) } catch {} }
 const loadLocal = (uid)    => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
 const clearLocal = (uid)   => { try { localStorage.removeItem(LS_KEY(uid)) } catch {} }
@@ -92,6 +90,16 @@ const mergeWithDefaults = (src, fallback = DEFAULTS) => ({
                         ? src.locationName
                         : fallback.locationName,
 })
+
+/* ── Promise with timeout helper ───────────────────────────────── */
+// FIX: Wraps any promise with a max wait time so saves can never hang forever
+const withTimeout = (promise, ms = 12000) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Request timed out')), ms)
+    ),
+  ])
 
 /* ── Sidebar badge ──────────────────────────────────────────────── */
 export const AlertsNavBadge = ({ subscribed, selectedCount }) => (
@@ -203,17 +211,7 @@ export default function Alerts() {
   const user = useAuthStore((s) => s.user)
   const uid  = user?.uid
 
-  /*
-   * LOADING STRATEGY
-   * ─────────────────────────────────────────────────────────────────
-   * 1. Always show skeleton until Firestore resolves (never flash wrong defaults)
-   * 2. If localStorage cache exists, paint it immediately as a fast-path
-   *    then let Firestore confirm/correct it silently
-   * 3. Firestore is always master — it always overwrites cache
-   * 4. On logout, clear localStorage so next user starts clean
-   */
-
-  const [loading,            setLoading]            = useState(true)  // always start loading
+  const [loading,            setLoading]            = useState(true)
   const [subscribed,         setSubscribed]         = useState(false)
   const [magnitude,          setMagnitude]          = useState(DEFAULTS.alertMagnitude)
   const [selectedMagnitudes, setSelectedMagnitudes] = useState(DEFAULTS.selectedMagnitudes)
@@ -240,11 +238,8 @@ export default function Alerts() {
   }
 
   useEffect(() => {
-    // User logged out — reset everything and clear cache
     if (!uid) {
-      if (prevUid.current) {
-        clearLocal(prevUid.current)
-      }
+      if (prevUid.current) clearLocal(prevUid.current)
       applyPrefs(DEFAULTS)
       setLoading(false)
       fetchedForUid.current = null
@@ -252,42 +247,30 @@ export default function Alerts() {
       return
     }
 
-    // Same uid, already fetched — no re-fetch needed
     if (fetchedForUid.current === uid) return
 
     prevUid.current = uid
 
-    // Step 1 — fast-paint from cache if available (prevents blank flash on same device)
     const cached = loadLocal(uid)
     if (cached) {
       applyPrefs(mergeWithDefaults(cached))
-      setLoading(false) // hide skeleton — show cached values immediately
+      setLoading(false)
     }
-    // If no cache, keep loading=true until Firestore resolves
 
-    // Step 2 — always fetch from Firestore (cross-device source of truth)
     setSyncing(true)
     getUserPreferences(uid)
       .then(res => {
         if (res.success && res.data && Object.keys(res.data).length > 0) {
-          // Firestore wins — always overwrite cache
           const p = mergeWithDefaults(res.data)
           applyPrefs(p)
-          saveLocal(uid, p) // refresh cache with latest Firestore values
-        } else if (!cached) {
-          // No Firestore data AND no cache → stay on DEFAULTS (already set)
-          // This means the user is new and hasn't saved prefs yet
+          saveLocal(uid, p)
         }
-        // If Firestore failed but we have cache, keep cache values (already applied)
         fetchedForUid.current = uid
       })
-      .catch(() => {
-        // Network error — keep cache or defaults, don't crash
-        fetchedForUid.current = uid
-      })
+      .catch(() => { fetchedForUid.current = uid })
       .finally(() => {
         setSyncing(false)
-        setLoading(false) // always reveal UI when done
+        setLoading(false)
       })
   }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -297,7 +280,6 @@ export default function Alerts() {
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Build full prefs object from current state — single source of truth for all saves
   const buildPrefs = (enabled) => ({
     alertsEnabled:      enabled,
     alertMagnitude:     magnitude,
@@ -339,46 +321,53 @@ export default function Alerts() {
   }
 
   /* ── Save ─────────────────────────────────────────────────────── */
+  // FIX: Wrapped in withTimeout(12s) so it can NEVER hang forever.
+  // Firestore save is awaited; backend notify is fire-and-forget (already handled in firebase.js).
   const handleSave = async () => {
     if (!uid)                       { showToast('Not logged in', 'error'); return }
     if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
 
     const prefs = buildPrefs(true)
 
-    // Optimistic UI update
     setSubscribed(true)
     setBtnState('saving')
 
-    // FIX: Save ALL fields including selectedMagnitudes + locationName
     try {
-      const result = await subscribeToAlerts(uid, {
-        magnitude,
-        selectedMagnitudes,
-        radius,
-        lat,
-        lon,
-        locationName,
-      })
+      const result = await withTimeout(
+        subscribeToAlerts(uid, {
+          magnitude,
+          selectedMagnitudes,
+          radius,
+          lat,
+          lon,
+          locationName,
+        }),
+        12000  // 12 second hard ceiling
+      )
 
       if (result.success) {
-        saveLocal(uid, prefs) // keep cache in sync
+        saveLocal(uid, prefs)
         setBtnState('saved')
         setTimeout(() => setBtnState('idle'), 2500)
         showToast(` Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
       } else {
+        setSubscribed(false)
         setBtnState('idle')
         showToast('Failed to save — please try again', 'error')
       }
-    } catch {
+    } catch (err) {
+      // Catches both real errors and our timeout
+      const timedOut = err?.message === 'Request timed out'
+      setSubscribed(false)
       setBtnState('idle')
-      showToast('Failed to save — please try again', 'error')
+      showToast(timedOut ? 'Save timed out — please try again' : 'Failed to save — please try again', 'error')
     }
   }
 
   /* ── Disable ──────────────────────────────────────────────────── */
   const handleDisable = async () => {
     if (!uid) return
-    const prefs = buildPrefs(false) // only flip alertsEnabled, keep all other prefs
+    const prefs = buildPrefs(false)
     setSubscribed(false)
     saveLocal(uid, prefs)
     showToast('Alerts disabled')
@@ -416,7 +405,7 @@ export default function Alerts() {
           ))}
         </div>
         <div style={{ color: '#3a5a79', fontSize: 12, textAlign: 'center', marginTop: 20 }}>
-           Loading your settings…
+          Loading your settings…
         </div>
       </div>
     )
@@ -452,7 +441,7 @@ export default function Alerts() {
         <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Alert Settings</h1>
         <p style={{ color: '#5a7a99', fontSize: 13, margin: 0 }}>
           Settings saved to your account — syncs across all devices
-          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}> Syncing…</span>}
+          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing…</span>}
         </p>
       </div>
 
@@ -529,7 +518,7 @@ export default function Alerts() {
                 color: allSelected ? '#00c8ff' : '#5a7a99',
                 transition: 'all 0.2s', letterSpacing: '0.05em', textTransform: 'uppercase',
               }}>
-                {allSelected ? ' All' : 'Select All'}
+                {allSelected ? '✓ All' : 'Select All'}
               </button>
             </div>
 
@@ -551,7 +540,7 @@ export default function Alerts() {
                       border: `1.5px solid ${active ? m.color : 'rgba(255,255,255,0.1)'}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 8, color: '#000', fontWeight: 900, transition: 'all 0.18s',
-                    }}>{active ? '' : ''}</div>
+                    }}>{active ? '✓' : ''}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{
                         width: 8, height: 8, borderRadius: '50%', background: m.color,
@@ -655,7 +644,7 @@ export default function Alerts() {
               borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? ' Detecting…' : ' Use My Current Location'}
+              {geoLoading ? '📡 Detecting…' : ' Use My Current Location'}
             </button>
 
             <div style={{
