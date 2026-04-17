@@ -48,11 +48,10 @@ export const db = initializeFirestore(app, {
 });
 
 // ══════════════════════════════════════════════════════════════════
-//  RECAPTCHA (required for phone auth)
+//  RECAPTCHA
 // ══════════════════════════════════════════════════════════════════
 
 export const setupRecaptcha = (containerId) => {
-  // Clear any existing verifier to avoid duplicate error
   if (window.recaptchaVerifier) {
     try { window.recaptchaVerifier.clear(); } catch (_) {}
     window.recaptchaVerifier = null;
@@ -60,34 +59,37 @@ export const setupRecaptcha = (containerId) => {
   window.recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
     size: 'invisible',
     callback: () => {},
-    'expired-callback': () => {
-      window.recaptchaVerifier = null;
-    }
+    'expired-callback': () => { window.recaptchaVerifier = null; }
   });
   return window.recaptchaVerifier;
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  HELPER — ensure Firestore user doc exists for social/phone logins
+//  HELPER — create user doc ONLY if it doesn't exist yet
+//  Never call this on existing users — it would wipe their prefs
 // ══════════════════════════════════════════════════════════════════
 
 const ensureUserDoc = async (user, extra = {}) => {
-  const ref = doc(db, 'users', user.uid);
+  const ref  = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
+    // Only runs once ever — on first social/phone login
     await setDoc(ref, {
-      email:          user.email || '',
-      displayName:    user.displayName || extra.displayName || '',
-      phone:          user.phoneNumber || '',
-      createdAt:      new Date().toISOString(),
-      alertsEnabled:  false,
-      alertMagnitude: 5.0,
-      alertRadius:    100,
-      userLat:        null,
-      userLon:        null,
+      email:              user.email || '',
+      displayName:        user.displayName || extra.displayName || '',
+      phone:              user.phoneNumber || '',
+      createdAt:          new Date().toISOString(),
+      alertsEnabled:      false,
+      alertMagnitude:     5.0,
+      selectedMagnitudes: ['Moderate', 'Strong', 'Major'],
+      alertRadius:        200,
+      userLat:            27.7172,
+      userLon:            85.3240,
+      locationName:       'Kathmandu, Nepal',
       ...extra
     });
   }
+  // If doc exists, do nothing — preserve saved preferences
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -99,17 +101,32 @@ export const registerUser = async (email, password, displayName) => {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
     await updateProfile(user, { displayName });
-    await setDoc(doc(db, 'users', user.uid), {
-      email:          user.email,
-      displayName:    displayName,
-      phone:          '',
-      createdAt:      new Date().toISOString(),
-      alertsEnabled:  false,
-      alertMagnitude: 5.0,
-      alertRadius:    100,
-      userLat:        null,
-      userLon:        null,
-    }, { merge: true });
+
+    // FIX: Only create doc if it doesn't exist — never overwrite existing prefs
+    const ref  = doc(db, 'users', user.uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        email:              user.email,
+        displayName:        displayName,
+        phone:              '',
+        createdAt:          new Date().toISOString(),
+        alertsEnabled:      false,
+        alertMagnitude:     5.0,
+        selectedMagnitudes: ['Moderate', 'Strong', 'Major'],
+        alertRadius:        200,
+        userLat:            27.7172,
+        userLon:            85.3240,
+        locationName:       'Kathmandu, Nepal',
+      });
+    } else {
+      // Doc exists — only update identity fields, never touch alert prefs
+      await setDoc(ref, {
+        email:       user.email,
+        displayName: displayName,
+      }, { merge: true });
+    }
+
     return { success: true, user };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
@@ -145,8 +162,8 @@ export const resetPassword = async (email) => {
 export const loginWithGoogle = async () => {
   try {
     const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    await ensureUserDoc(result.user);
+    const result   = await signInWithPopup(auth, provider);
+    await ensureUserDoc(result.user); // safe — only writes if new user
     return { success: true, user: result.user };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
@@ -154,14 +171,13 @@ export const loginWithGoogle = async () => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  PHONE AUTH — Step 1: Send OTP
+//  PHONE AUTH
 // ══════════════════════════════════════════════════════════════════
 
 export const sendPhoneOTP = async (phoneNumber, containerId) => {
   try {
-    const appVerifier = setupRecaptcha(containerId);
+    const appVerifier       = setupRecaptcha(containerId);
     const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
-    // Store confirmationResult globally so verifyPhoneOTP can access it
     window.confirmationResult = confirmationResult;
     return { success: true };
   } catch (error) {
@@ -169,17 +185,13 @@ export const sendPhoneOTP = async (phoneNumber, containerId) => {
   }
 };
 
-// ══════════════════════════════════════════════════════════════════
-//  PHONE AUTH — Step 2: Verify OTP
-// ══════════════════════════════════════════════════════════════════
-
 export const verifyPhoneOTP = async (otp) => {
   try {
     if (!window.confirmationResult) {
       return { success: false, error: 'Session expired. Please request a new OTP.' };
     }
     const result = await window.confirmationResult.confirm(otp);
-    await ensureUserDoc(result.user);
+    await ensureUserDoc(result.user); // safe — only writes if new user
     window.confirmationResult = null;
     return { success: true, user: result.user };
   } catch (error) {
@@ -236,18 +248,24 @@ export const updateUserPreferences = async (userId, preferences) => {
 
 // ══════════════════════════════════════════════════════════════════
 //  ALERT SUBSCRIPTIONS
+//  FIX: Now saves ALL fields including selectedMagnitudes + locationName
 // ══════════════════════════════════════════════════════════════════
 
 export const subscribeToAlerts = async (userId, alertSettings) => {
   try {
-    await setDoc(doc(db, 'users', userId), {
-      alertsEnabled:  true,
-      alertMagnitude: alertSettings.magnitude,
-      alertRadius:    alertSettings.radius,
-      userLat:        alertSettings.lat,
-      userLon:        alertSettings.lon,
-      updatedAt:      new Date().toISOString()
-    }, { merge: true });
+    // FIX: Save every field the UI uses — nothing left out
+    const prefsToSave = {
+      alertsEnabled:      true,
+      alertMagnitude:     alertSettings.magnitude,
+      selectedMagnitudes: alertSettings.selectedMagnitudes ?? [],
+      alertRadius:        alertSettings.radius,
+      userLat:            alertSettings.lat,
+      userLon:            alertSettings.lon,
+      locationName:       alertSettings.locationName ?? '',
+      updatedAt:          new Date().toISOString(),
+    };
+
+    await setDoc(doc(db, 'users', userId), prefsToSave, { merge: true });
 
     const user = auth.currentUser;
     if (user) {
@@ -266,6 +284,7 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
 
 export const unsubscribeFromAlerts = async (userId) => {
   try {
+    // FIX: Only flip the flag — never touch other prefs
     await setDoc(doc(db, 'users', userId), {
       alertsEnabled: false,
       updatedAt:     new Date().toISOString()

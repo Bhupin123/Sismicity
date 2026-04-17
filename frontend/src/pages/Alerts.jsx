@@ -47,15 +47,15 @@ const DEFAULTS = {
   locationName:       'Kathmandu, Nepal',
 }
 
-/* ── localStorage cache (same-device speed only) ────────────────── */
-// localStorage is NEVER the source of truth on a new/different device.
-// Firestore is always master. localStorage only gives an instant first paint
-// while Firestore resolves, then Firestore data overwrites it.
-const LS_KEY    = (uid) => `seismoiq_prefs_${uid}`
+/* ── localStorage helpers ───────────────────────────────────────── */
+// localStorage is a same-device speed cache ONLY.
+// Firestore is always master — it overwrites cache on every load.
+const LS_KEY    = (uid) => `seismoiq_prefs_v2_${uid}` // v2 key avoids stale old cache
 const saveLocal = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.stringify(d)) } catch {} }
 const loadLocal = (uid)    => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
+const clearLocal = (uid)   => { try { localStorage.removeItem(LS_KEY(uid)) } catch {} }
 
-/* ── Reverse geocode (Nominatim — no key needed) ────────────────── */
+/* ── Reverse geocode ────────────────────────────────────────────── */
 const reverseGeocode = async (lat, lon) => {
   try {
     const res  = await fetch(
@@ -78,18 +78,22 @@ const reverseGeocode = async (lat, lon) => {
   }
 }
 
-/* ── Merge Firestore data with fallback — only overwrite defined fields ── */
+/* ── Merge Firestore data with fallback ─────────────────────────── */
 const mergeWithDefaults = (src, fallback = DEFAULTS) => ({
-  alertsEnabled:      src.alertsEnabled      != null ? !!src.alertsEnabled                    : fallback.alertsEnabled,
-  alertMagnitude:     src.alertMagnitude      != null ? src.alertMagnitude                     : fallback.alertMagnitude,
-  selectedMagnitudes: Array.isArray(src.selectedMagnitudes) ? src.selectedMagnitudes           : fallback.selectedMagnitudes,
-  alertRadius:        src.alertRadius         != null ? src.alertRadius                        : fallback.alertRadius,
-  userLat:            src.userLat             != null ? src.userLat                            : fallback.userLat,
-  userLon:            src.userLon             != null ? src.userLon                            : fallback.userLon,
-  locationName:       src.locationName        != null ? src.locationName                       : fallback.locationName,
+  alertsEnabled:      src.alertsEnabled      != null ? !!src.alertsEnabled                      : fallback.alertsEnabled,
+  alertMagnitude:     src.alertMagnitude      != null ? Number(src.alertMagnitude)               : fallback.alertMagnitude,
+  selectedMagnitudes: Array.isArray(src.selectedMagnitudes) && src.selectedMagnitudes.length > 0
+                        ? src.selectedMagnitudes
+                        : fallback.selectedMagnitudes,
+  alertRadius:        src.alertRadius         != null ? Number(src.alertRadius)                  : fallback.alertRadius,
+  userLat:            src.userLat             != null ? Number(src.userLat)                      : fallback.userLat,
+  userLon:            src.userLon             != null ? Number(src.userLon)                      : fallback.userLon,
+  locationName:       src.locationName        != null && src.locationName !== ''
+                        ? src.locationName
+                        : fallback.locationName,
 })
 
-/* ── Sidebar badge (export for sidebar) ────────────────────────── */
+/* ── Sidebar badge ──────────────────────────────────────────────── */
 export const AlertsNavBadge = ({ subscribed, selectedCount }) => (
   <div style={{
     display: 'flex', alignItems: 'center', gap: 5,
@@ -144,10 +148,10 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
         {[
-          { label: 'Levels Watched', value: selectedMagnitudes.length > 0 ? `${selectedMagnitudes.length} / 5` : '—', color: '#00c8ff'              },
-          { label: 'Radius',         value: `${radius} km`,                                                            color: '#a78bfa'              },
-          { label: 'Coverage Area',  value: `~${areaKm2.toLocaleString()} km²`,                                        color: '#81c784'              },
-          { label: 'Highest Risk',   value: highestRisk || '—',                                                        color: riskMag?.color || '#5a7a99' },
+          { label: 'Levels Watched', value: selectedMagnitudes.length > 0 ? `${selectedMagnitudes.length} / 5` : '—', color: '#00c8ff'                    },
+          { label: 'Radius',         value: `${radius} km`,                                                            color: '#a78bfa'                    },
+          { label: 'Coverage Area',  value: `~${areaKm2.toLocaleString()} km²`,                                        color: '#81c784'                    },
+          { label: 'Highest Risk',   value: highestRisk || '—',                                                        color: riskMag?.color || '#5a7a99'  },
         ].map(({ label, value, color }) => (
           <div key={label} style={{
             padding: '10px 12px', borderRadius: 8,
@@ -202,23 +206,15 @@ export default function Alerts() {
   /*
    * LOADING STRATEGY
    * ─────────────────────────────────────────────────────────────────
-   * Same device / refresh:
-   *   1. Paint immediately from localStorage cache (no flash)
-   *   2. Firestore resolves → silently confirms / corrects state
-   *   3. Update localStorage cache with Firestore result
-   *
-   * New device / first login (empty localStorage):
-   *   1. Show loading skeleton (no stale defaults flash)
-   *   2. Firestore resolves → populate state
-   *   3. Seed localStorage cache for future same-device speed
-   *
-   * Firestore is ALWAYS master. localStorage is NEVER trusted on its
-   * own — it's only used as a fast-paint cache that Firestore corrects.
+   * 1. Always show skeleton until Firestore resolves (never flash wrong defaults)
+   * 2. If localStorage cache exists, paint it immediately as a fast-path
+   *    then let Firestore confirm/correct it silently
+   * 3. Firestore is always master — it always overwrites cache
+   * 4. On logout, clear localStorage so next user starts clean
    */
 
-  const hasCachedData   = uid ? !!loadLocal(uid) : false
-  const [loading,            setLoading]            = useState(!hasCachedData)  // skeleton only if no cache
-  const [subscribed,         setSubscribed]         = useState(DEFAULTS.alertsEnabled)
+  const [loading,            setLoading]            = useState(true)  // always start loading
+  const [subscribed,         setSubscribed]         = useState(false)
   const [magnitude,          setMagnitude]          = useState(DEFAULTS.alertMagnitude)
   const [selectedMagnitudes, setSelectedMagnitudes] = useState(DEFAULTS.selectedMagnitudes)
   const [radius,             setRadius]             = useState(DEFAULTS.alertRadius)
@@ -230,8 +226,8 @@ export default function Alerts() {
   const [btnState,           setBtnState]           = useState('idle')
   const [syncing,            setSyncing]            = useState(false)
 
-  // Prevent double-fetch within the same session (StrictMode, fast nav)
   const fetchedForUid = useRef(null)
+  const prevUid       = useRef(null)
 
   const applyPrefs = (p) => {
     setSubscribed(p.alertsEnabled)
@@ -244,37 +240,54 @@ export default function Alerts() {
   }
 
   useEffect(() => {
-    if (!uid) { setLoading(false); return }
+    // User logged out — reset everything and clear cache
+    if (!uid) {
+      if (prevUid.current) {
+        clearLocal(prevUid.current)
+      }
+      applyPrefs(DEFAULTS)
+      setLoading(false)
+      fetchedForUid.current = null
+      prevUid.current = null
+      return
+    }
+
+    // Same uid, already fetched — no re-fetch needed
     if (fetchedForUid.current === uid) return
 
-    // Step 1 — instant paint from cache if available (same device)
+    prevUid.current = uid
+
+    // Step 1 — fast-paint from cache if available (prevents blank flash on same device)
     const cached = loadLocal(uid)
     if (cached) {
       applyPrefs(mergeWithDefaults(cached))
-      // Don't clear loading yet — Firestore might have newer data
+      setLoading(false) // hide skeleton — show cached values immediately
     }
+    // If no cache, keep loading=true until Firestore resolves
 
-    // Step 2 — always fetch Firestore (cross-device master)
+    // Step 2 — always fetch from Firestore (cross-device source of truth)
     setSyncing(true)
     getUserPreferences(uid)
       .then(res => {
         if (res.success && res.data && Object.keys(res.data).length > 0) {
-          // Firestore wins — always overwrite whatever cache painted
+          // Firestore wins — always overwrite cache
           const p = mergeWithDefaults(res.data)
           applyPrefs(p)
-          saveLocal(uid, p)       // refresh local cache with Firestore truth
+          saveLocal(uid, p) // refresh cache with latest Firestore values
+        } else if (!cached) {
+          // No Firestore data AND no cache → stay on DEFAULTS (already set)
+          // This means the user is new and hasn't saved prefs yet
         }
-        // If Firestore returned empty and cache exists, keep cache values (already applied above)
-        // If both empty, keep DEFAULTS (already the initial state)
+        // If Firestore failed but we have cache, keep cache values (already applied)
         fetchedForUid.current = uid
       })
       .catch(() => {
-        // Network failure — keep cache or defaults, don't crash
+        // Network error — keep cache or defaults, don't crash
         fetchedForUid.current = uid
       })
       .finally(() => {
         setSyncing(false)
-        setLoading(false)
+        setLoading(false) // always reveal UI when done
       })
   }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -284,7 +297,7 @@ export default function Alerts() {
     setTimeout(() => setToast(null), 3500)
   }
 
-  // Build full prefs object from current React state — single source of truth
+  // Build full prefs object from current state — single source of truth for all saves
   const buildPrefs = (enabled) => ({
     alertsEnabled:      enabled,
     alertMagnitude:     magnitude,
@@ -326,30 +339,49 @@ export default function Alerts() {
   }
 
   /* ── Save ─────────────────────────────────────────────────────── */
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!uid)                       { showToast('Not logged in', 'error'); return }
     if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
 
     const prefs = buildPrefs(true)
+
+    // Optimistic UI update
     setSubscribed(true)
-    setBtnState('saved')
-    setTimeout(() => setBtnState('idle'), 2500)
-    showToast(`Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
+    setBtnState('saving')
 
-    saveLocal(uid, prefs)   // instant local persistence → survives refresh on same device
+    // FIX: Save ALL fields including selectedMagnitudes + locationName
+    try {
+      const result = await subscribeToAlerts(uid, {
+        magnitude,
+        selectedMagnitudes,
+        radius,
+        lat,
+        lon,
+        locationName,
+      })
 
-    // Firestore sync — cross-device persistence + SendGrid logic (untouched)
-    subscribeToAlerts(uid, { magnitude, selectedMagnitudes, radius, lat, lon, locationName })
-      .catch(err => console.warn('Firestore sync failed:', err))
+      if (result.success) {
+        saveLocal(uid, prefs) // keep cache in sync
+        setBtnState('saved')
+        setTimeout(() => setBtnState('idle'), 2500)
+        showToast(` Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
+      } else {
+        setBtnState('idle')
+        showToast('Failed to save — please try again', 'error')
+      }
+    } catch {
+      setBtnState('idle')
+      showToast('Failed to save — please try again', 'error')
+    }
   }
 
   /* ── Disable ──────────────────────────────────────────────────── */
-  const handleDisable = () => {
+  const handleDisable = async () => {
     if (!uid) return
-    const prefs = buildPrefs(false)   // flip only alertsEnabled, keep everything else
+    const prefs = buildPrefs(false) // only flip alertsEnabled, keep all other prefs
     setSubscribed(false)
-    showToast('Alerts disabled')
     saveLocal(uid, prefs)
+    showToast('Alerts disabled')
     unsubscribeFromAlerts(uid).catch(() => {})
   }
 
@@ -365,7 +397,7 @@ export default function Alerts() {
     boxSizing: 'border-box', fontFamily: 'monospace',
   }
 
-  /* ── Skeleton — shown on new device until Firestore resolves ─── */
+  /* ── Skeleton ─────────────────────────────────────────────────── */
   if (loading) {
     return (
       <div style={{ padding: '4px 0', maxWidth: 900, margin: '0 auto' }}>
@@ -384,7 +416,7 @@ export default function Alerts() {
           ))}
         </div>
         <div style={{ color: '#3a5a79', fontSize: 12, textAlign: 'center', marginTop: 20 }}>
-          ⟳ Loading your settings…
+           Loading your settings…
         </div>
       </div>
     )
@@ -420,7 +452,7 @@ export default function Alerts() {
         <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Alert Settings</h1>
         <p style={{ color: '#5a7a99', fontSize: 13, margin: 0 }}>
           Settings saved to your account — syncs across all devices
-          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing…</span>}
+          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}> Syncing…</span>}
         </p>
       </div>
 
@@ -623,10 +655,9 @@ export default function Alerts() {
               borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? '⟳ Detecting…' : ' Use My Current Location'}
+              {geoLoading ? ' Detecting…' : ' Use My Current Location'}
             </button>
 
-            {/* Location name + coords display row */}
             <div style={{
               padding: '10px 14px', borderRadius: 8, marginBottom: 12,
               background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.10)',
@@ -647,7 +678,6 @@ export default function Alerts() {
               </div>
             </div>
 
-            {/* Manual input */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {[
                 { label: 'Latitude',  value: lat, fn: (v) => { setLat(v); setLocationName(`${v}, ${lon}`) } },
@@ -677,20 +707,28 @@ export default function Alerts() {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button onClick={handleSave} disabled={!canSave} style={{
+            <button onClick={handleSave} disabled={!canSave || btnState === 'saving'} style={{
               width: '100%', padding: '14px', border: 'none', borderRadius: 10,
               background: btnState === 'saved'
                 ? 'linear-gradient(135deg,#00aa55,#007733)'
-                : !canSave
-                  ? 'rgba(255,255,255,0.05)'
-                  : 'linear-gradient(135deg,#00c8ff,#0077aa)',
+                : btnState === 'saving'
+                  ? 'rgba(0,200,255,0.3)'
+                  : !canSave
+                    ? 'rgba(255,255,255,0.05)'
+                    : 'linear-gradient(135deg,#00c8ff,#0077aa)',
               color: !canSave ? '#3a5a79' : '#fff',
               fontSize: 14, fontWeight: 700,
-              cursor: !canSave ? 'not-allowed' : 'pointer',
+              cursor: (!canSave || btnState === 'saving') ? 'not-allowed' : 'pointer',
               transition: 'background 0.3s',
               boxShadow: canSave ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
             }}>
-              {btnState === 'saved' ? ' Saved!' : subscribed ? ' Update Settings' : ' Enable Alerts'}
+              {btnState === 'saved'
+                ? ' Saved!'
+                : btnState === 'saving'
+                  ? ' Saving…'
+                  : subscribed
+                    ? ' Update Settings'
+                    : ' Enable Alerts'}
             </button>
             {subscribed && (
               <button onClick={handleDisable} style={{
