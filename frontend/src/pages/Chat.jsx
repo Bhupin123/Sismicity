@@ -39,8 +39,16 @@ export default function Chat() {
   }
 
   return (
-    <div style={{ maxWidth: 820, margin: '0 auto' }}>
-      <Panel>
+    // KEY FIX: full width with side padding, no overflow
+    <div style={{
+      width: '100%',
+      maxWidth: 820,
+      margin: '0 auto',
+      padding: '0 8px',
+      boxSizing: 'border-box',
+    }}>
+      <Panel style={{ width: '100%', boxSizing: 'border-box' }}>
+
         {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10,
@@ -48,7 +56,7 @@ export default function Chat() {
           background: 'var(--card)', flexWrap: 'wrap',
         }}>
           <WaveAnim />
-          <div style={{ flex: 1, minWidth: 140 }}>
+          <div style={{ flex: 1, minWidth: 120 }}>
             <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--txt)' }}>SeismoIQ Chat</div>
             <div style={{ fontSize: 9, color: 'var(--txt2)', fontFamily: 'var(--mono)', marginTop: 1 }}>
               AI-POWERED EARTHQUAKE ANALYTICS
@@ -64,15 +72,13 @@ export default function Chat() {
           </div>
         </div>
 
-        {/* Quick questions — scrollable on mobile */}
+        {/* Quick questions */}
         <div style={{
           padding: '8px 12px', borderBottom: '1px solid var(--border)',
           display: 'flex', gap: 6, overflowX: 'auto',
           WebkitOverflowScrolling: 'touch',
           scrollbarWidth: 'none', msOverflowStyle: 'none',
-        }}
-        onMouseEnter={e => e.currentTarget.style.scrollbarWidth = 'none'}
-        >
+        }}>
           {QUICK.map((q) => (
             <button key={q} onClick={() => send(q)} style={{
               padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600,
@@ -88,14 +94,15 @@ export default function Chat() {
           ))}
         </div>
 
-        {/* Messages */}
+        {/* Messages — fluid height instead of fixed 340px */}
         <div style={{
-          height: 340, overflowY: 'auto', padding: 12,
+          height: 'clamp(200px, 45vh, 420px)',
+          overflowY: 'auto', padding: 12,
           display: 'flex', flexDirection: 'column', gap: 8,
         }}>
           {messages.map((m, i) => (
             <div key={i} style={{
-              maxWidth: '85%',
+              maxWidth: '88%',
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
               padding: '9px 13px',
               fontSize: 13, lineHeight: 1.55,
@@ -127,11 +134,11 @@ export default function Chat() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
+        {/* Input — nowrap so Send button never drops below input */}
         <div style={{
           display: 'flex', gap: 8, padding: 10,
           borderTop: '1px solid var(--border)',
-          flexWrap: 'wrap',
+          flexWrap: 'nowrap', alignItems: 'center',
         }}>
           <input
             className="form-input"
@@ -141,7 +148,7 @@ export default function Chat() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !loading && send()}
           />
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
             <Btn onClick={() => send()} disabled={loading || !input.trim()}>
               Send ↵
             </Btn>
@@ -152,6 +159,7 @@ export default function Chat() {
             )}
           </div>
         </div>
+
       </Panel>
     </div>
   )
