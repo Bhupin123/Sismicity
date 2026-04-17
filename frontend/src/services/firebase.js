@@ -27,7 +27,8 @@ import {
   getDocs
 } from 'firebase/firestore';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// FIX: was 'http://localhost:8000' — now points to the correct Render backend
+const API_URL = import.meta.env.VITE_API_URL || 'https://sismicity-1.onrender.com';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDewN-vqEEKOUwClI-WbF7Ghq4YKYiwMak",
@@ -102,7 +103,6 @@ export const registerUser = async (email, password, displayName) => {
     const user = userCredential.user;
     await updateProfile(user, { displayName });
 
-    // FIX: Only create doc if it doesn't exist — never overwrite existing prefs
     const ref  = doc(db, 'users', user.uid);
     const snap = await getDoc(ref);
     if (!snap.exists()) {
@@ -176,7 +176,7 @@ export const loginWithGoogle = async () => {
 
 export const sendPhoneOTP = async (phoneNumber, containerId) => {
   try {
-    const appVerifier       = setupRecaptcha(containerId);
+    const appVerifier        = setupRecaptcha(containerId);
     const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
     window.confirmationResult = confirmationResult;
     return { success: true };
@@ -248,12 +248,11 @@ export const updateUserPreferences = async (userId, preferences) => {
 
 // ══════════════════════════════════════════════════════════════════
 //  ALERT SUBSCRIPTIONS
-//  FIX: Now saves ALL fields including selectedMagnitudes + locationName
+//  FIX: Correct API URL + 10s timeout so button never hangs forever
 // ══════════════════════════════════════════════════════════════════
 
 export const subscribeToAlerts = async (userId, alertSettings) => {
   try {
-    // FIX: Save every field the UI uses — nothing left out
     const prefsToSave = {
       alertsEnabled:      true,
       alertMagnitude:     alertSettings.magnitude,
@@ -265,15 +264,21 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
       updatedAt:          new Date().toISOString(),
     };
 
+    // Always save to Firestore first — this is the source of truth
     await setDoc(doc(db, 'users', userId), prefsToSave, { merge: true });
 
+    // Fire-and-forget to backend with a 10s timeout
+    // so a cold Render startup never freezes the Save button
     const user = auth.currentUser;
     if (user) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
       fetch(`${API_URL}/api/alerts/subscribe`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ userId, email: user.email, ...alertSettings })
-      }).catch(() => {});
+        body:    JSON.stringify({ userId, email: user.email, ...alertSettings }),
+        signal:  controller.signal,
+      }).catch(() => {}).finally(() => clearTimeout(timeout));
     }
 
     return { success: true };
@@ -284,17 +289,21 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
 
 export const unsubscribeFromAlerts = async (userId) => {
   try {
-    // FIX: Only flip the flag — never touch other prefs
+    // Only flip the flag — never touch other prefs
     await setDoc(doc(db, 'users', userId), {
       alertsEnabled: false,
       updatedAt:     new Date().toISOString()
     }, { merge: true });
 
+    // Fire-and-forget with 10s timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     fetch(`${API_URL}/api/alerts/unsubscribe`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ userId })
-    }).catch(() => {});
+      body:    JSON.stringify({ userId }),
+      signal:  controller.signal,
+    }).catch(() => {}).finally(() => clearTimeout(timeout));
 
     return { success: true };
   } catch (error) {
