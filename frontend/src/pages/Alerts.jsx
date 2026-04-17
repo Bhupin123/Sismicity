@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useAuthStore } from '../store/useAuthStore'
 import { subscribeToAlerts, unsubscribeFromAlerts, getUserPreferences } from '../services/firebase'
 
@@ -20,11 +20,11 @@ const SLabel = ({ children, style = {} }) => (
 
 /* ── Magnitude data ─────────────────────────────────────────────── */
 const MAG_LEVELS = [
-  { label: 'Minor',    color: '#4fc3f7', bg: 'rgba(79,195,247,0.08)',   border: 'rgba(79,195,247,0.35)',   desc: 'Felt slightly',    range: '2.0–3.9' },
-  { label: 'Light',    color: '#81c784', bg: 'rgba(129,199,132,0.08)',  border: 'rgba(129,199,132,0.35)',  desc: 'Felt by many',     range: '4.0–4.9' },
-  { label: 'Moderate', color: '#ffb74d', bg: 'rgba(255,183,77,0.08)',   border: 'rgba(255,183,77,0.35)',   desc: 'Slight damage',    range: '5.0–5.9' },
-  { label: 'Strong',   color: '#ff8a65', bg: 'rgba(255,138,101,0.08)',  border: 'rgba(255,138,101,0.35)',  desc: 'Significant dmg',  range: '6.0–6.9' },
-  { label: 'Major',    color: '#ef5350', bg: 'rgba(239,83,80,0.08)',    border: 'rgba(239,83,80,0.35)',    desc: 'Widespread dmg',   range: '7.0+' },
+  { label: 'Minor',    color: '#4fc3f7', bg: 'rgba(79,195,247,0.08)',   border: 'rgba(79,195,247,0.35)',   desc: 'Felt slightly',   range: '2.0–3.9' },
+  { label: 'Light',    color: '#81c784', bg: 'rgba(129,199,132,0.08)',  border: 'rgba(129,199,132,0.35)',  desc: 'Felt by many',    range: '4.0–4.9' },
+  { label: 'Moderate', color: '#ffb74d', bg: 'rgba(255,183,77,0.08)',   border: 'rgba(255,183,77,0.35)',   desc: 'Slight damage',   range: '5.0–5.9' },
+  { label: 'Strong',   color: '#ff8a65', bg: 'rgba(255,138,101,0.08)',  border: 'rgba(255,138,101,0.35)',  desc: 'Significant dmg', range: '6.0–6.9' },
+  { label: 'Major',    color: '#ef5350', bg: 'rgba(239,83,80,0.08)',    border: 'rgba(239,83,80,0.35)',    desc: 'Widespread dmg',  range: '7.0+' },
 ]
 
 /* ── Radius presets ─────────────────────────────────────────────── */
@@ -36,16 +36,58 @@ const RADIUS_PRESETS = [
   { label: '1000 km', value: 1000, desc: 'Continental' },
 ]
 
-/* ── Storage helpers ────────────────────────────────────────────── */
+/* ── Defaults ───────────────────────────────────────────────────── */
+const DEFAULTS = {
+  alertsEnabled:      false,
+  alertMagnitude:     5.0,
+  selectedMagnitudes: ['Moderate', 'Strong', 'Major'],
+  alertRadius:        200,
+  userLat:            27.7172,
+  userLon:            85.3240,
+  locationName:       'Kathmandu, Nepal',
+}
+
+/* ── localStorage cache (same-device speed only) ────────────────── */
+// localStorage is NEVER the source of truth on a new/different device.
+// Firestore is always master. localStorage only gives an instant first paint
+// while Firestore resolves, then Firestore data overwrites it.
 const LS_KEY    = (uid) => `seismoiq_prefs_${uid}`
 const saveLocal = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.stringify(d)) } catch {} }
-const loadLocal = (uid)   => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
+const loadLocal = (uid)    => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
 
-const DEFAULTS = {
-  alertsEnabled: false, alertMagnitude: 5.0,
-  selectedMagnitudes: ['Moderate', 'Strong', 'Major'],
-  alertRadius: 200, userLat: 27.7172, userLon: 85.3240,
+/* ── Reverse geocode (Nominatim — no key needed) ────────────────── */
+const reverseGeocode = async (lat, lon) => {
+  try {
+    const res  = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+      { headers: { 'Accept-Language': 'en' } }
+    )
+    const data = await res.json()
+    const city =
+      data.address?.city    ||
+      data.address?.town    ||
+      data.address?.village ||
+      data.address?.county  ||
+      data.address?.state   || ''
+    const country = data.address?.country || ''
+    return city && country
+      ? `${city}, ${country}`
+      : data.display_name?.split(',').slice(0, 2).join(',').trim() || ''
+  } catch {
+    return ''
+  }
 }
+
+/* ── Merge Firestore data with fallback — only overwrite defined fields ── */
+const mergeWithDefaults = (src, fallback = DEFAULTS) => ({
+  alertsEnabled:      src.alertsEnabled      != null ? !!src.alertsEnabled                    : fallback.alertsEnabled,
+  alertMagnitude:     src.alertMagnitude      != null ? src.alertMagnitude                     : fallback.alertMagnitude,
+  selectedMagnitudes: Array.isArray(src.selectedMagnitudes) ? src.selectedMagnitudes           : fallback.selectedMagnitudes,
+  alertRadius:        src.alertRadius         != null ? src.alertRadius                        : fallback.alertRadius,
+  userLat:            src.userLat             != null ? src.userLat                            : fallback.userLat,
+  userLon:            src.userLon             != null ? src.userLon                            : fallback.userLon,
+  locationName:       src.locationName        != null ? src.locationName                       : fallback.locationName,
+})
 
 /* ── Sidebar badge (export for sidebar) ────────────────────────── */
 export const AlertsNavBadge = ({ subscribed, selectedCount }) => (
@@ -69,7 +111,7 @@ export const AlertsNavBadge = ({ subscribed, selectedCount }) => (
 
 /* ── Alert Summary Card ─────────────────────────────────────────── */
 const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
-  const areaKm2 = Math.round(Math.PI * radius * radius)
+  const areaKm2     = Math.round(Math.PI * radius * radius)
   const highestRisk = [...selectedMagnitudes].sort((a, b) => {
     const order = ['Minor', 'Light', 'Moderate', 'Strong', 'Major']
     return order.indexOf(b) - order.indexOf(a)
@@ -78,13 +120,11 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
 
   return (
     <Card style={{ position: 'relative', overflow: 'hidden' }}>
-      {/* Decorative rings */}
       <div style={{ position: 'absolute', top: -30, right: -30, width: 120, height: 120, borderRadius: '50%', border: `1px solid ${subscribed ? 'rgba(0,200,100,0.1)' : 'rgba(0,200,255,0.07)'}`, pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', top: -10, right: -10, width: 80, height: 80, borderRadius: '50%', border: `1px solid ${subscribed ? 'rgba(0,200,100,0.07)' : 'rgba(0,200,255,0.05)'}`, pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', top: -10, right: -10, width: 80,  height: 80,  borderRadius: '50%', border: `1px solid ${subscribed ? 'rgba(0,200,100,0.07)' : 'rgba(0,200,255,0.05)'}`, pointerEvents: 'none' }} />
 
       <SLabel>Alert Summary</SLabel>
 
-      {/* Status pill */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '8px 12px', borderRadius: 8, marginBottom: 14,
@@ -102,13 +142,12 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
         </span>
       </div>
 
-      {/* Stats 2×2 grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
         {[
-          { label: 'Levels Watched', value: selectedMagnitudes.length > 0 ? `${selectedMagnitudes.length} / 5` : '—', color: '#00c8ff' },
-          { label: 'Radius',         value: `${radius} km`,   color: '#a78bfa' },
-          { label: 'Coverage Area',  value: `~${areaKm2.toLocaleString()} km²`, color: '#81c784' },
-          { label: 'Highest Risk',   value: highestRisk || '—', color: riskMag?.color || '#5a7a99' },
+          { label: 'Levels Watched', value: selectedMagnitudes.length > 0 ? `${selectedMagnitudes.length} / 5` : '—', color: '#00c8ff'              },
+          { label: 'Radius',         value: `${radius} km`,                                                            color: '#a78bfa'              },
+          { label: 'Coverage Area',  value: `~${areaKm2.toLocaleString()} km²`,                                        color: '#81c784'              },
+          { label: 'Highest Risk',   value: highestRisk || '—',                                                        color: riskMag?.color || '#5a7a99' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{
             padding: '10px 12px', borderRadius: 8,
@@ -120,7 +159,6 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
         ))}
       </div>
 
-      {/* Active level tags */}
       {selectedMagnitudes.length > 0 ? (
         <div>
           <div style={{ color: '#3a5a79', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>Watching</div>
@@ -154,48 +192,108 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
   )
 }
 
-/* ── Main Component ─────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+   ══════════════════════════════════════════════════════════════════ */
 export default function Alerts() {
   const user = useAuthStore((s) => s.user)
   const uid  = user?.uid
-  const local = uid ? (loadLocal(uid) || DEFAULTS) : DEFAULTS
 
-  const [subscribed,         setSubscribed]         = useState(local.alertsEnabled)
-  const [magnitude,          setMagnitude]          = useState(local.alertMagnitude)
-  const [selectedMagnitudes, setSelectedMagnitudes] = useState(local.selectedMagnitudes ?? DEFAULTS.selectedMagnitudes)
-  const [radius,             setRadius]             = useState(local.alertRadius)
-  const [lat,                setLat]                = useState(local.userLat ?? DEFAULTS.userLat)
-  const [lon,                setLon]                = useState(local.userLon ?? DEFAULTS.userLon)
+  /*
+   * LOADING STRATEGY
+   * ─────────────────────────────────────────────────────────────────
+   * Same device / refresh:
+   *   1. Paint immediately from localStorage cache (no flash)
+   *   2. Firestore resolves → silently confirms / corrects state
+   *   3. Update localStorage cache with Firestore result
+   *
+   * New device / first login (empty localStorage):
+   *   1. Show loading skeleton (no stale defaults flash)
+   *   2. Firestore resolves → populate state
+   *   3. Seed localStorage cache for future same-device speed
+   *
+   * Firestore is ALWAYS master. localStorage is NEVER trusted on its
+   * own — it's only used as a fast-paint cache that Firestore corrects.
+   */
+
+  const hasCachedData   = uid ? !!loadLocal(uid) : false
+  const [loading,            setLoading]            = useState(!hasCachedData)  // skeleton only if no cache
+  const [subscribed,         setSubscribed]         = useState(DEFAULTS.alertsEnabled)
+  const [magnitude,          setMagnitude]          = useState(DEFAULTS.alertMagnitude)
+  const [selectedMagnitudes, setSelectedMagnitudes] = useState(DEFAULTS.selectedMagnitudes)
+  const [radius,             setRadius]             = useState(DEFAULTS.alertRadius)
+  const [lat,                setLat]                = useState(DEFAULTS.userLat)
+  const [lon,                setLon]                = useState(DEFAULTS.userLon)
+  const [locationName,       setLocationName]       = useState(DEFAULTS.locationName)
   const [geoLoading,         setGeoLoading]         = useState(false)
   const [toast,              setToast]              = useState(null)
   const [btnState,           setBtnState]           = useState('idle')
   const [syncing,            setSyncing]            = useState(false)
 
-  useEffect(() => {
-    if (!uid) return
-    setSyncing(true)
-    getUserPreferences(uid).then(res => {
-      if (res.success && res.data) {
-        const d = res.data
-        const p = {
-          alertsEnabled:      !!d.alertsEnabled,
-          alertMagnitude:     d.alertMagnitude     ?? DEFAULTS.alertMagnitude,
-          selectedMagnitudes: d.selectedMagnitudes ?? DEFAULTS.selectedMagnitudes,
-          alertRadius:        d.alertRadius        ?? DEFAULTS.alertRadius,
-          userLat:            d.userLat            ?? DEFAULTS.userLat,
-          userLon:            d.userLon            ?? DEFAULTS.userLon,
-        }
-        setSubscribed(p.alertsEnabled); setMagnitude(p.alertMagnitude)
-        setSelectedMagnitudes(p.selectedMagnitudes); setRadius(p.alertRadius)
-        setLat(p.userLat); setLon(p.userLon)
-        saveLocal(uid, p)
-      }
-    }).catch(() => {}).finally(() => setSyncing(false))
-  }, [uid])
+  // Prevent double-fetch within the same session (StrictMode, fast nav)
+  const fetchedForUid = useRef(null)
 
-  const showToast = (msg, type = 'success') => {
-    setToast({ msg, type }); setTimeout(() => setToast(null), 3500)
+  const applyPrefs = (p) => {
+    setSubscribed(p.alertsEnabled)
+    setMagnitude(p.alertMagnitude)
+    setSelectedMagnitudes(p.selectedMagnitudes)
+    setRadius(p.alertRadius)
+    setLat(p.userLat)
+    setLon(p.userLon)
+    setLocationName(p.locationName)
   }
+
+  useEffect(() => {
+    if (!uid) { setLoading(false); return }
+    if (fetchedForUid.current === uid) return
+
+    // Step 1 — instant paint from cache if available (same device)
+    const cached = loadLocal(uid)
+    if (cached) {
+      applyPrefs(mergeWithDefaults(cached))
+      // Don't clear loading yet — Firestore might have newer data
+    }
+
+    // Step 2 — always fetch Firestore (cross-device master)
+    setSyncing(true)
+    getUserPreferences(uid)
+      .then(res => {
+        if (res.success && res.data && Object.keys(res.data).length > 0) {
+          // Firestore wins — always overwrite whatever cache painted
+          const p = mergeWithDefaults(res.data)
+          applyPrefs(p)
+          saveLocal(uid, p)       // refresh local cache with Firestore truth
+        }
+        // If Firestore returned empty and cache exists, keep cache values (already applied above)
+        // If both empty, keep DEFAULTS (already the initial state)
+        fetchedForUid.current = uid
+      })
+      .catch(() => {
+        // Network failure — keep cache or defaults, don't crash
+        fetchedForUid.current = uid
+      })
+      .finally(() => {
+        setSyncing(false)
+        setLoading(false)
+      })
+  }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Helpers ──────────────────────────────────────────────────── */
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 3500)
+  }
+
+  // Build full prefs object from current React state — single source of truth
+  const buildPrefs = (enabled) => ({
+    alertsEnabled:      enabled,
+    alertMagnitude:     magnitude,
+    selectedMagnitudes,
+    alertRadius:        radius,
+    userLat:            lat,
+    userLon:            lon,
+    locationName,
+  })
 
   const toggleMagnitude = (label) =>
     setSelectedMagnitudes(prev =>
@@ -207,36 +305,55 @@ export default function Alerts() {
       selectedMagnitudes.length === MAG_LEVELS.length ? [] : MAG_LEVELS.map(m => m.label)
     )
 
+  /* ── Location detect ──────────────────────────────────────────── */
   const handleGetLocation = () => {
     if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return }
     setGeoLoading(true)
     navigator.geolocation.getCurrentPosition(
-      pos => {
-        setLat(parseFloat(pos.coords.latitude.toFixed(4)))
-        setLon(parseFloat(pos.coords.longitude.toFixed(4)))
-        setGeoLoading(false); showToast('Location detected!')
+      async pos => {
+        const newLat = parseFloat(pos.coords.latitude.toFixed(4))
+        const newLon = parseFloat(pos.coords.longitude.toFixed(4))
+        setLat(newLat)
+        setLon(newLon)
+        const name        = await reverseGeocode(newLat, newLon)
+        const displayName = name || `${newLat}, ${newLon}`
+        setLocationName(displayName)
+        setGeoLoading(false)
+        showToast(` ${displayName}`)
       },
       () => { setGeoLoading(false); showToast('Could not get location', 'error') }
     )
   }
 
+  /* ── Save ─────────────────────────────────────────────────────── */
   const handleSave = () => {
     if (!uid)                       { showToast('Not logged in', 'error'); return }
     if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
-    const prefs = { alertsEnabled: true, alertMagnitude: magnitude, selectedMagnitudes, alertRadius: radius, userLat: lat, userLon: lon }
-    setSubscribed(true); setBtnState('saved'); setTimeout(() => setBtnState('idle'), 2500)
+
+    const prefs = buildPrefs(true)
+    setSubscribed(true)
+    setBtnState('saved')
+    setTimeout(() => setBtnState('idle'), 2500)
     showToast(`Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
-    saveLocal(uid, prefs)
-    subscribeToAlerts(uid, { magnitude, selectedMagnitudes, radius, lat, lon }).catch(err => console.warn('Firestore sync failed:', err))
+
+    saveLocal(uid, prefs)   // instant local persistence → survives refresh on same device
+
+    // Firestore sync — cross-device persistence + SendGrid logic (untouched)
+    subscribeToAlerts(uid, { magnitude, selectedMagnitudes, radius, lat, lon, locationName })
+      .catch(err => console.warn('Firestore sync failed:', err))
   }
 
+  /* ── Disable ──────────────────────────────────────────────────── */
   const handleDisable = () => {
     if (!uid) return
-    setSubscribed(false); showToast('Alerts disabled')
-    saveLocal(uid, { ...(loadLocal(uid) || DEFAULTS), alertsEnabled: false })
+    const prefs = buildPrefs(false)   // flip only alertsEnabled, keep everything else
+    setSubscribed(false)
+    showToast('Alerts disabled')
+    saveLocal(uid, prefs)
     unsubscribeFromAlerts(uid).catch(() => {})
   }
 
+  /* ── Derived ──────────────────────────────────────────────────── */
   const allSelected  = selectedMagnitudes.length === MAG_LEVELS.length
   const canSave      = selectedMagnitudes.length > 0
   const activePreset = RADIUS_PRESETS.find(p => p.value === radius)
@@ -248,6 +365,32 @@ export default function Alerts() {
     boxSizing: 'border-box', fontFamily: 'monospace',
   }
 
+  /* ── Skeleton — shown on new device until Firestore resolves ─── */
+  if (loading) {
+    return (
+      <div style={{ padding: '4px 0', maxWidth: 900, margin: '0 auto' }}>
+        <style>{`@keyframes shimmer { 0%{opacity:0.35} 50%{opacity:0.65} 100%{opacity:0.35} }`}</style>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ width: 160, height: 22, borderRadius: 6, background: 'rgba(0,200,255,0.09)', animation: 'shimmer 1.5s infinite', marginBottom: 10 }} />
+          <div style={{ width: 260, height: 13, borderRadius: 4, background: 'rgba(0,200,255,0.05)', animation: 'shimmer 1.5s infinite' }} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+          {[200, 260, 180, 220].map((h, i) => (
+            <div key={i} style={{
+              height: h, borderRadius: 14,
+              background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.08)',
+              animation: `shimmer 1.5s infinite ${i * 0.15}s`,
+            }} />
+          ))}
+        </div>
+        <div style={{ color: '#3a5a79', fontSize: 12, textAlign: 'center', marginTop: 20 }}>
+          ⟳ Loading your settings…
+        </div>
+      </div>
+    )
+  }
+
+  /* ── Main render ──────────────────────────────────────────────── */
   return (
     <div style={{ padding: '4px 0', maxWidth: 900, margin: '0 auto' }}>
       <style>{`
@@ -264,7 +407,7 @@ export default function Alerts() {
       {toast && (
         <div style={{
           position: 'fixed', top: 16, right: 16, zIndex: 9999,
-          padding: '12px 18px', borderRadius: 10, maxWidth: 280,
+          padding: '12px 18px', borderRadius: 10, maxWidth: 300,
           background: toast.type === 'error' ? '#881111' : '#005522',
           color: '#fff', fontSize: 13, fontWeight: 600,
           boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
@@ -276,8 +419,8 @@ export default function Alerts() {
       <div style={{ marginBottom: 16 }}>
         <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Alert Settings</h1>
         <p style={{ color: '#5a7a99', fontSize: 13, margin: 0 }}>
-          Settings saved to your account
-          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing...</span>}
+          Settings saved to your account — syncs across all devices
+          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing…</span>}
         </p>
       </div>
 
@@ -294,14 +437,16 @@ export default function Alerts() {
           </div>
           <div style={{ color: '#5a7a99', fontSize: 11, marginTop: 2 }}>
             {subscribed
-              ? `${selectedMagnitudes.join(', ')} · ${radius} km radius · (${lat}, ${lon})`
+              ? `${selectedMagnitudes.join(', ')} · ${radius} km ·  ${locationName}`
               : 'Configure settings and click Enable Alerts'}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {subscribed && selectedMagnitudes.map(label => {
             const m = MAG_LEVELS.find(x => x.label === label)
-            return m ? <div key={label} style={{ width: 8, height: 8, borderRadius: '50%', background: m.color, boxShadow: `0 0 5px ${m.color}` }} /> : null
+            return m ? (
+              <div key={label} style={{ width: 8, height: 8, borderRadius: '50%', background: m.color, boxShadow: `0 0 5px ${m.color}` }} />
+            ) : null
           })}
           <div style={{
             padding: '3px 10px', borderRadius: 6, fontSize: 10, fontWeight: 700,
@@ -316,7 +461,7 @@ export default function Alerts() {
       {/* Main grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
 
-        {/* LEFT */}
+        {/* ── LEFT column ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Email */}
@@ -376,7 +521,11 @@ export default function Alerts() {
                       fontSize: 8, color: '#000', fontWeight: 900, transition: 'all 0.18s',
                     }}>{active ? '' : ''}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: m.color, boxShadow: active ? `0 0 6px ${m.color}` : 'none', transition: 'box-shadow 0.18s', flexShrink: 0 }} />
+                      <div style={{
+                        width: 8, height: 8, borderRadius: '50%', background: m.color,
+                        boxShadow: active ? `0 0 6px ${m.color}` : 'none',
+                        transition: 'box-shadow 0.18s', flexShrink: 0,
+                      }} />
                       <span style={{ color: active ? m.color : '#5a7a99', fontSize: 12, fontWeight: 700, transition: 'color 0.18s' }}>{m.label}</span>
                     </div>
                     <div style={{ color: active ? '#8ab4cc' : '#3a5a79', fontSize: 10, fontFamily: 'monospace', paddingLeft: 14 }}>M {m.range}</div>
@@ -392,7 +541,9 @@ export default function Alerts() {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             }}>
               <span style={{ color: '#5a7a99', fontSize: 11 }}>
-                {selectedMagnitudes.length === 0 ? 'No levels selected' : `${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} selected`}
+                {selectedMagnitudes.length === 0
+                  ? 'No levels selected'
+                  : `${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} selected`}
               </span>
               <div style={{ display: 'flex', gap: 4 }}>
                 {MAG_LEVELS.map(m => (
@@ -407,7 +558,7 @@ export default function Alerts() {
             </div>
           </Card>
 
-          {/* Alert Radius — presets */}
+          {/* Alert Radius */}
           <Card>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <SLabel style={{ marginBottom: 0 }}>Alert Radius</SLabel>
@@ -421,7 +572,7 @@ export default function Alerts() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
               {RADIUS_PRESETS.map((p, i) => {
-                const active = radius === p.value
+                const active   = radius === p.value
                 const ringSize = 18 + i * 5
                 return (
                   <button key={p.value} className="rad-btn" onClick={() => setRadius(p.value)} style={{
@@ -459,34 +610,65 @@ export default function Alerts() {
           </Card>
         </div>
 
-        {/* RIGHT */}
+        {/* ── RIGHT column ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Location */}
           <Card>
             <SLabel>Your Location</SLabel>
+
             <button onClick={handleGetLocation} disabled={geoLoading} style={{
               width: '100%', padding: '10px',
               background: 'rgba(0,200,255,0.08)', border: '1px solid rgba(0,200,255,0.25)',
               borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? '⟳ Detecting...' : ' Use My Current Location'}
+              {geoLoading ? '⟳ Detecting…' : ' Use My Current Location'}
             </button>
+
+            {/* Location name + coords display row */}
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, marginBottom: 12,
+              background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.10)',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 15 }}></span>
+                <span style={{ color: '#c0dff0', fontSize: 13, fontWeight: 600 }}>{locationName}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 20, paddingLeft: 24 }}>
+                <div>
+                  <span style={{ color: '#3a5a79', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Lat </span>
+                  <span style={{ color: '#00c8ff', fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{lat}</span>
+                </div>
+                <div>
+                  <span style={{ color: '#3a5a79', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Lon </span>
+                  <span style={{ color: '#00c8ff', fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{lon}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Manual input */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              {[{ label: 'Latitude', value: lat, fn: setLat }, { label: 'Longitude', value: lon, fn: setLon }].map(({ label, value, fn }) => (
+              {[
+                { label: 'Latitude',  value: lat, fn: (v) => { setLat(v); setLocationName(`${v}, ${lon}`) } },
+                { label: 'Longitude', value: lon, fn: (v) => { setLon(v); setLocationName(`${lat}, ${v}`) } },
+              ].map(({ label, value, fn }) => (
                 <div key={label}>
                   <SLabel>{label}</SLabel>
-                  <input type="number" value={value} step="0.0001"
+                  <input
+                    type="number" value={value} step="0.0001"
                     onChange={e => fn(parseFloat(e.target.value) || 0)}
-                    style={inputStyle} />
+                    style={inputStyle}
+                  />
                 </div>
               ))}
             </div>
-            <p style={{ color: '#3a5a79', fontSize: 11, margin: '8px 0 0' }}>Default: Kathmandu, Nepal</p>
+            <p style={{ color: '#3a5a79', fontSize: 11, margin: '8px 0 0' }}>
+              Default: Kathmandu, Nepal · 27.7172, 85.3240
+            </p>
           </Card>
 
-          {/* Alert Summary (replaces magnitude reference) */}
+          {/* Alert Summary */}
           <AlertSummaryCard
             subscribed={subscribed}
             selectedMagnitudes={selectedMagnitudes}
@@ -495,7 +677,7 @@ export default function Alerts() {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button onClick={handleSave} style={{
+            <button onClick={handleSave} disabled={!canSave} style={{
               width: '100%', padding: '14px', border: 'none', borderRadius: 10,
               background: btnState === 'saved'
                 ? 'linear-gradient(135deg,#00aa55,#007733)'
@@ -516,7 +698,7 @@ export default function Alerts() {
                 border: '1px solid rgba(255,80,80,0.4)', borderRadius: 10,
                 color: '#ff6060', fontSize: 13, fontWeight: 600, cursor: 'pointer',
               }}>
-                 Disable Alerts
+                Disable Alerts
               </button>
             )}
           </div>
