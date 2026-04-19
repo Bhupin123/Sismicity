@@ -136,7 +136,7 @@ export default function LiveFeed() {
               color: '#fff', fontSize: 13, fontWeight: 600,
               cursor: loading ? 'not-allowed' : 'pointer',
             }}>
-              {loading ? 'Loading...' : '↻ Refresh'}
+              {loading ? 'Loading...' : ' Refresh'}
             </button>
           </div>
         </div>
