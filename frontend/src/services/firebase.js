@@ -27,7 +27,6 @@ import {
   getDocs
 } from 'firebase/firestore';
 
-// FIX: was 'http://localhost:8000' — now points to the correct Render backend
 const API_URL = import.meta.env.VITE_API_URL || 'https://sismicity-1.onrender.com';
 
 const firebaseConfig = {
@@ -67,14 +66,12 @@ export const setupRecaptcha = (containerId) => {
 
 // ══════════════════════════════════════════════════════════════════
 //  HELPER — create user doc ONLY if it doesn't exist yet
-//  Never call this on existing users — it would wipe their prefs
 // ══════════════════════════════════════════════════════════════════
 
 const ensureUserDoc = async (user, extra = {}) => {
   const ref  = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
-    // Only runs once ever — on first social/phone login
     await setDoc(ref, {
       email:              user.email || '',
       displayName:        user.displayName || extra.displayName || '',
@@ -90,7 +87,6 @@ const ensureUserDoc = async (user, extra = {}) => {
       ...extra
     });
   }
-  // If doc exists, do nothing — preserve saved preferences
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -120,7 +116,6 @@ export const registerUser = async (email, password, displayName) => {
         locationName:       'Kathmandu, Nepal',
       });
     } else {
-      // Doc exists — only update identity fields, never touch alert prefs
       await setDoc(ref, {
         email:       user.email,
         displayName: displayName,
@@ -163,7 +158,7 @@ export const loginWithGoogle = async () => {
   try {
     const provider = new GoogleAuthProvider();
     const result   = await signInWithPopup(auth, provider);
-    await ensureUserDoc(result.user); // safe — only writes if new user
+    await ensureUserDoc(result.user);
     return { success: true, user: result.user };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
@@ -191,7 +186,7 @@ export const verifyPhoneOTP = async (otp) => {
       return { success: false, error: 'Session expired. Please request a new OTP.' };
     }
     const result = await window.confirmationResult.confirm(otp);
-    await ensureUserDoc(result.user); // safe — only writes if new user
+    await ensureUserDoc(result.user);
     window.confirmationResult = null;
     return { success: true, user: result.user };
   } catch (error) {
@@ -248,7 +243,20 @@ export const updateUserPreferences = async (userId, preferences) => {
 
 // ══════════════════════════════════════════════════════════════════
 //  ALERT SUBSCRIPTIONS
-//  FIX: Correct API URL + 10s timeout so button never hangs forever
+//
+//  HOW THIS WORKS:
+//  1. Write prefs to Firestore immediately — this is the source of truth.
+//     Firestore SDK uses the local persistent cache so this is near-instant
+//     even offline. The write is confirmed once the server acknowledges it.
+//
+//  2. Fire-and-forget a POST to the Render backend (for SendGrid email).
+//     This uses a 15s AbortController timeout so a cold Render startup
+//     (which can take ~30s) doesn't block the UI at all.
+//     If the backend is unreachable, we still return { success: true }
+//     because the Firestore write already succeeded.
+//
+//  DO NOT wrap this function in an external withTimeout() — the Firestore
+//  setDoc is already optimistic and the fetch is already guarded internally.
 // ══════════════════════════════════════════════════════════════════
 
 export const subscribeToAlerts = async (userId, alertSettings) => {
@@ -264,25 +272,53 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
       updatedAt:          new Date().toISOString(),
     };
 
-    // Always save to Firestore first — this is the source of truth
+    // ── Step 1: Write to Firestore (source of truth, uses local cache) ──
+    // This should complete in < 1 second with persistent cache enabled.
     await setDoc(doc(db, 'users', userId), prefsToSave, { merge: true });
 
-    // Fire-and-forget to backend with a 10s timeout
-    // so a cold Render startup never freezes the Save button
+    // ── Step 2: Notify backend for SendGrid email (fire-and-forget) ──
+    // 15s timeout — Render free tier can take ~30s cold start, so we
+    // don't wait for it. The alert prefs are already saved above.
     const user = auth.currentUser;
     if (user) {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10000);
+      const timeout = setTimeout(() => controller.abort(), 15000);
       fetch(`${API_URL}/api/alerts/subscribe`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ userId, email: user.email, ...alertSettings }),
-        signal:  controller.signal,
-      }).catch(() => {}).finally(() => clearTimeout(timeout));
+        body:    JSON.stringify({
+          userId,
+          email:              user.email,
+          displayName:        user.displayName || '',
+          magnitude:          alertSettings.magnitude,
+          selectedMagnitudes: alertSettings.selectedMagnitudes,
+          radius:             alertSettings.radius,
+          lat:                alertSettings.lat,
+          lon:                alertSettings.lon,
+          locationName:       alertSettings.locationName,
+        }),
+        signal: controller.signal,
+      })
+        .then(async (res) => {
+          clearTimeout(timeout);
+          if (!res.ok) {
+            console.warn('[SeismoIQ] Backend subscribe responded:', res.status);
+          }
+        })
+        .catch((err) => {
+          clearTimeout(timeout);
+          // AbortError = timed out, TypeError = network unreachable
+          // Both are acceptable — Firestore write already succeeded.
+          if (err.name !== 'AbortError') {
+            console.warn('[SeismoIQ] Backend subscribe failed (non-blocking):', err.message);
+          }
+        });
     }
 
     return { success: true };
   } catch (error) {
+    // Only reaches here if the Firestore setDoc itself failed
+    console.error('[SeismoIQ] subscribeToAlerts Firestore error:', error);
     return { success: false, error: error.message };
   }
 };
@@ -295,15 +331,17 @@ export const unsubscribeFromAlerts = async (userId) => {
       updatedAt:     new Date().toISOString()
     }, { merge: true });
 
-    // Fire-and-forget with 10s timeout
+    // Fire-and-forget with 15s timeout
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
     fetch(`${API_URL}/api/alerts/unsubscribe`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ userId }),
       signal:  controller.signal,
-    }).catch(() => {}).finally(() => clearTimeout(timeout));
+    })
+      .catch(() => {})
+      .finally(() => clearTimeout(timeout));
 
     return { success: true };
   } catch (error) {
