@@ -36,7 +36,7 @@ const RADIUS_PRESETS = [
   { label: '1000 km', value: 1000, desc: 'Continental' },
 ]
 
-/* ── Defaults ───────────────────────────────────────────────────── */
+/* ── Defaults (Kathmandu — updated to user's actual location) ───── */
 const DEFAULTS = {
   alertsEnabled:      false,
   alertMagnitude:     5.0,
@@ -76,17 +76,31 @@ const reverseGeocode = async (lat, lon) => {
   }
 }
 
+/* ── Auto-detect location silently on first load ────────────────── */
+const detectLocation = () =>
+  new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({
+        lat: parseFloat(pos.coords.latitude.toFixed(4)),
+        lon: parseFloat(pos.coords.longitude.toFixed(4)),
+      }),
+      () => resolve(null),
+      { timeout: 5000, maximumAge: 60000 }
+    )
+  })
+
 /* ── Merge Firestore data with fallback ─────────────────────────── */
 const mergeWithDefaults = (src, fallback = DEFAULTS) => ({
-  alertsEnabled:      src.alertsEnabled      != null ? !!src.alertsEnabled                      : fallback.alertsEnabled,
-  alertMagnitude:     src.alertMagnitude      != null ? Number(src.alertMagnitude)               : fallback.alertMagnitude,
+  alertsEnabled:      src.alertsEnabled      != null ? !!src.alertsEnabled                       : fallback.alertsEnabled,
+  alertMagnitude:     src.alertMagnitude      != null ? Number(src.alertMagnitude)                : fallback.alertMagnitude,
   selectedMagnitudes: Array.isArray(src.selectedMagnitudes) && src.selectedMagnitudes.length > 0
                         ? src.selectedMagnitudes
                         : fallback.selectedMagnitudes,
-  alertRadius:        src.alertRadius         != null ? Number(src.alertRadius)                  : fallback.alertRadius,
-  userLat:            src.userLat             != null ? Number(src.userLat)                      : fallback.userLat,
-  userLon:            src.userLon             != null ? Number(src.userLon)                      : fallback.userLon,
-  locationName:       src.locationName        != null && src.locationName !== ''
+  alertRadius:        src.alertRadius         != null ? Number(src.alertRadius)                   : fallback.alertRadius,
+  userLat:            src.userLat             != null ? Number(src.userLat)                       : fallback.userLat,
+  userLon:            src.userLon             != null ? Number(src.userLon)                       : fallback.userLon,
+  locationName:       src.locationName != null && src.locationName !== ''
                         ? src.locationName
                         : fallback.locationName,
 })
@@ -146,10 +160,10 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
         {[
-          { label: 'Levels Watched', value: selectedMagnitudes.length > 0 ? `${selectedMagnitudes.length} / 5` : '—', color: '#00c8ff'                    },
-          { label: 'Radius',         value: `${radius} km`,                                                            color: '#a78bfa'                    },
-          { label: 'Coverage Area',  value: `~${areaKm2.toLocaleString()} km²`,                                        color: '#81c784'                    },
-          { label: 'Highest Risk',   value: highestRisk || '—',                                                        color: riskMag?.color || '#5a7a99'  },
+          { label: 'Levels Watched', value: selectedMagnitudes.length > 0 ? `${selectedMagnitudes.length} / 5` : '—', color: '#00c8ff' },
+          { label: 'Radius',         value: `${radius} km`,                                                            color: '#a78bfa' },
+          { label: 'Coverage Area',  value: `~${areaKm2.toLocaleString()} km²`,                                        color: '#81c784' },
+          { label: 'Highest Risk',   value: highestRisk || '—',                                                        color: riskMag?.color || '#5a7a99' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{
             padding: '10px 12px', borderRadius: 8,
@@ -187,7 +201,7 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
           background: 'rgba(255,80,80,0.06)', border: '1px solid rgba(255,80,80,0.15)',
           color: '#ff6060', fontSize: 11,
         }}>
-          ⚠ No magnitude levels selected
+           No magnitude levels selected
         </div>
       )}
     </Card>
@@ -201,12 +215,8 @@ export default function Alerts() {
   const user = useAuthStore((s) => s.user)
   const uid  = user?.uid
 
-  // FIX: Start with loading=false if we have a localStorage cache so the
-  // skeleton never flashes when the user already has saved prefs.
-  const [loading,            setLoading]            = useState(() => {
-    if (!uid) return false
-    return loadLocal(uid) === null   // only show skeleton if no cache at all
-  })
+  // Only show skeleton if no local cache at all — avoids slow first paint
+  const [loading,            setLoading]            = useState(() => uid ? loadLocal(uid) === null : false)
   const [subscribed,         setSubscribed]         = useState(DEFAULTS.alertsEnabled)
   const [magnitude,          setMagnitude]          = useState(DEFAULTS.alertMagnitude)
   const [selectedMagnitudes, setSelectedMagnitudes] = useState(DEFAULTS.selectedMagnitudes)
@@ -216,7 +226,7 @@ export default function Alerts() {
   const [locationName,       setLocationName]       = useState(DEFAULTS.locationName)
   const [geoLoading,         setGeoLoading]         = useState(false)
   const [toast,              setToast]              = useState(null)
-  const [btnState,           setBtnState]           = useState('idle')
+  const [btnState,           setBtnState]           = useState('idle') // idle | saving | saved | error
   const [syncing,            setSyncing]            = useState(false)
 
   const fetchedForUid = useRef(null)
@@ -232,6 +242,7 @@ export default function Alerts() {
     setLocationName(p.locationName)
   }
 
+  // ── Load preferences + auto-detect location if none saved ────────
   useEffect(() => {
     if (!uid) {
       if (prevUid.current) clearLocal(prevUid.current)
@@ -245,46 +256,67 @@ export default function Alerts() {
     if (fetchedForUid.current === uid) return
     prevUid.current = uid
 
-    // ── Step 1: Apply localStorage cache immediately (zero wait) ──
+    // Step 1: Apply local cache immediately (zero delay)
     const cached = loadLocal(uid)
     if (cached) {
       applyPrefs(mergeWithDefaults(cached))
-      setLoading(false)   // UI is ready — show real content right away
+      setLoading(false)
     } else {
-      setLoading(true)    // No cache — show skeleton until Firestore responds
+      setLoading(true)
     }
 
-    // ── Step 2: Sync from Firestore in the background ──
+    // Step 2: Firestore sync in background + auto-detect real location
     setSyncing(true)
-    getUserPreferences(uid)
-      .then(res => {
-        if (res.success && res.data && Object.keys(res.data).length > 0) {
-          const p = mergeWithDefaults(res.data)
-          applyPrefs(p)
-          saveLocal(uid, p)   // update cache for next visit
-        }
-        fetchedForUid.current = uid
-      })
-      .catch(() => { fetchedForUid.current = uid })
-      .finally(() => {
-        setSyncing(false)
-        setLoading(false)   // always clear skeleton after Firestore responds
-      })
+    Promise.all([
+      getUserPreferences(uid),
+      // Auto-detect real location if no cache or cache has default coords
+      (!cached || (cached.userLat === DEFAULTS.userLat && cached.userLon === DEFAULTS.userLon))
+        ? detectLocation()
+        : Promise.resolve(null),
+    ]).then(async ([res, geoPos]) => {
+      let prefs = cached ? mergeWithDefaults(cached) : { ...DEFAULTS }
+
+      // Apply Firestore data if available
+      if (res.success && res.data && Object.keys(res.data).length > 0) {
+        prefs = mergeWithDefaults(res.data)
+      }
+
+      // Override location with real GPS if it was the default/missing
+      if (
+        geoPos &&
+        (prefs.userLat === DEFAULTS.userLat && prefs.userLon === DEFAULTS.userLon)
+      ) {
+        const name = await reverseGeocode(geoPos.lat, geoPos.lon)
+        prefs.userLat      = geoPos.lat
+        prefs.userLon      = geoPos.lon
+        prefs.locationName = name || `${geoPos.lat}, ${geoPos.lon}`
+      }
+
+      applyPrefs(prefs)
+      saveLocal(uid, prefs)
+      fetchedForUid.current = uid
+    })
+    .catch(() => { fetchedForUid.current = uid })
+    .finally(() => {
+      setSyncing(false)
+      setLoading(false)
+    })
   }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Helpers ──────────────────────────────────────────────────── */
+  /* ── Toast ────────────────────────────────────────────────────── */
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
     setTimeout(() => setToast(null), 3500)
   }
 
+  /* ── Build prefs object ───────────────────────────────────────── */
   const buildPrefs = (enabled) => ({
-    alertsEnabled:      enabled,
-    alertMagnitude:     magnitude,
+    alertsEnabled: enabled,
+    alertMagnitude: magnitude,
     selectedMagnitudes,
-    alertRadius:        radius,
-    userLat:            lat,
-    userLon:            lon,
+    alertRadius: radius,
+    userLat: lat,
+    userLon: lon,
     locationName,
   })
 
@@ -298,7 +330,7 @@ export default function Alerts() {
       selectedMagnitudes.length === MAG_LEVELS.length ? [] : MAG_LEVELS.map(m => m.label)
     )
 
-  /* ── Location detect ──────────────────────────────────────────── */
+  /* ── Manual location detect ───────────────────────────────────── */
   const handleGetLocation = () => {
     if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return }
     setGeoLoading(true)
@@ -319,14 +351,11 @@ export default function Alerts() {
   }
 
   /* ── Save ─────────────────────────────────────────────────────── */
-  // FIX: No more withTimeout() wrapper — subscribeToAlerts already handles
-  // its own timeout internally (AbortController on fetch, Firestore is direct).
-  // The old withTimeout was killing the Firestore write prematurely.
+  // NOTE: No withTimeout() here — firebase.js already has an 8s hard timeout
+  // on the Firestore write itself, and 15s on the backend fetch.
   const handleSave = async () => {
     if (!uid)                       { showToast('Not logged in', 'error'); return }
     if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
-
-    const prefs = buildPrefs(true)
 
     setBtnState('saving')
 
@@ -342,16 +371,18 @@ export default function Alerts() {
 
       if (result.success) {
         setSubscribed(true)
-        saveLocal(uid, prefs)
+        saveLocal(uid, buildPrefs(true))
         setBtnState('saved')
         setTimeout(() => setBtnState('idle'), 2500)
         showToast(` Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
       } else {
-        setBtnState('idle')
+        setBtnState('error')
+        setTimeout(() => setBtnState('idle'), 3000)
         showToast(result.error || 'Failed to save — please try again', 'error')
       }
-    } catch (err) {
-      setBtnState('idle')
+    } catch {
+      setBtnState('error')
+      setTimeout(() => setBtnState('idle'), 3000)
       showToast('Failed to save — please try again', 'error')
     }
   }
@@ -359,9 +390,8 @@ export default function Alerts() {
   /* ── Disable ──────────────────────────────────────────────────── */
   const handleDisable = async () => {
     if (!uid) return
-    const prefs = buildPrefs(false)
     setSubscribed(false)
-    saveLocal(uid, prefs)
+    saveLocal(uid, buildPrefs(false))
     showToast('Alerts disabled')
     unsubscribeFromAlerts(uid).catch(() => {})
   }
@@ -377,6 +407,21 @@ export default function Alerts() {
     color: '#e0e0e0', fontSize: 13, outline: 'none',
     boxSizing: 'border-box', fontFamily: 'monospace',
   }
+
+  /* ── Save button appearance ───────────────────────────────────── */
+  const btnBg = {
+    saved:  'linear-gradient(135deg,#00aa55,#007733)',
+    saving: 'rgba(0,200,255,0.25)',
+    error:  'rgba(255,60,60,0.25)',
+    idle:   canSave ? 'linear-gradient(135deg,#00c8ff,#0077aa)' : 'rgba(255,255,255,0.05)',
+  }[btnState] || 'linear-gradient(135deg,#00c8ff,#0077aa)'
+
+  const btnLabel = {
+    saved:  ' Saved!',
+    saving: ' Saving…',
+    error:  ' Failed — try again',
+    idle:   subscribed ? ' Update Settings' : ' Enable Alerts',
+  }[btnState]
 
   /* ── Skeleton ─────────────────────────────────────────────────── */
   if (loading) {
@@ -420,7 +465,7 @@ export default function Alerts() {
       {toast && (
         <div style={{
           position: 'fixed', top: 16, right: 16, zIndex: 9999,
-          padding: '12px 18px', borderRadius: 10, maxWidth: 300,
+          padding: '12px 18px', borderRadius: 10, maxWidth: 320,
           background: toast.type === 'error' ? '#881111' : '#005522',
           color: '#fff', fontSize: 13, fontWeight: 600,
           boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
@@ -433,7 +478,7 @@ export default function Alerts() {
         <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Alert Settings</h1>
         <p style={{ color: '#5a7a99', fontSize: 13, margin: 0 }}>
           Settings saved to your account — syncs across all devices
-          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing…</span>}
+          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}> Syncing…</span>}
         </p>
       </div>
 
@@ -675,7 +720,7 @@ export default function Alerts() {
               ))}
             </div>
             <p style={{ color: '#3a5a79', fontSize: 11, margin: '8px 0 0' }}>
-              Default: Kathmandu, Nepal · 27.7172, 85.3240
+              Location auto-detected from your browser on first load.
             </p>
           </Card>
 
@@ -693,27 +738,15 @@ export default function Alerts() {
               disabled={!canSave || btnState === 'saving'}
               style={{
                 width: '100%', padding: '14px', border: 'none', borderRadius: 10,
-                background: btnState === 'saved'
-                  ? 'linear-gradient(135deg,#00aa55,#007733)'
-                  : btnState === 'saving'
-                    ? 'rgba(0,200,255,0.3)'
-                    : !canSave
-                      ? 'rgba(255,255,255,0.05)'
-                      : 'linear-gradient(135deg,#00c8ff,#0077aa)',
+                background: btnBg,
                 color: !canSave ? '#3a5a79' : '#fff',
                 fontSize: 14, fontWeight: 700,
                 cursor: (!canSave || btnState === 'saving') ? 'not-allowed' : 'pointer',
                 transition: 'background 0.3s',
-                boxShadow: canSave ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
+                boxShadow: canSave && btnState === 'idle' ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
               }}
             >
-              {btnState === 'saved'
-                ? ' Saved!'
-                : btnState === 'saving'
-                  ? '⟳ Saving…'
-                  : subscribed
-                    ? ' Update Settings'
-                    : ' Enable Alerts'}
+              {btnLabel}
             </button>
 
             {subscribed && (
