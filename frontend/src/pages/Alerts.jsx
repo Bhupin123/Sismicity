@@ -48,10 +48,10 @@ const DEFAULTS = {
 }
 
 /* ── localStorage helpers ───────────────────────────────────────── */
-const LS_KEY    = (uid) => `seismoiq_prefs_v2_${uid}`
-const saveLocal = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.stringify(d)) } catch {} }
-const loadLocal = (uid)    => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
-const clearLocal = (uid)   => { try { localStorage.removeItem(LS_KEY(uid)) } catch {} }
+const LS_KEY     = (uid) => `seismoiq_prefs_v2_${uid}`
+const saveLocal  = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.stringify(d)) } catch {} }
+const loadLocal  = (uid)    => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
+const clearLocal = (uid)    => { try { localStorage.removeItem(LS_KEY(uid)) } catch {} }
 
 /* ── Reverse geocode ────────────────────────────────────────────── */
 const reverseGeocode = async (lat, lon) => {
@@ -90,16 +90,6 @@ const mergeWithDefaults = (src, fallback = DEFAULTS) => ({
                         ? src.locationName
                         : fallback.locationName,
 })
-
-/* ── Promise with timeout helper ───────────────────────────────── */
-// FIX: Wraps any promise with a max wait time so saves can never hang forever
-const withTimeout = (promise, ms = 12000) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Request timed out')), ms)
-    ),
-  ])
 
 /* ── Sidebar badge ──────────────────────────────────────────────── */
 export const AlertsNavBadge = ({ subscribed, selectedCount }) => (
@@ -211,8 +201,13 @@ export default function Alerts() {
   const user = useAuthStore((s) => s.user)
   const uid  = user?.uid
 
-  const [loading,            setLoading]            = useState(true)
-  const [subscribed,         setSubscribed]         = useState(false)
+  // FIX: Start with loading=false if we have a localStorage cache so the
+  // skeleton never flashes when the user already has saved prefs.
+  const [loading,            setLoading]            = useState(() => {
+    if (!uid) return false
+    return loadLocal(uid) === null   // only show skeleton if no cache at all
+  })
+  const [subscribed,         setSubscribed]         = useState(DEFAULTS.alertsEnabled)
   const [magnitude,          setMagnitude]          = useState(DEFAULTS.alertMagnitude)
   const [selectedMagnitudes, setSelectedMagnitudes] = useState(DEFAULTS.selectedMagnitudes)
   const [radius,             setRadius]             = useState(DEFAULTS.alertRadius)
@@ -248,29 +243,32 @@ export default function Alerts() {
     }
 
     if (fetchedForUid.current === uid) return
-
     prevUid.current = uid
 
+    // ── Step 1: Apply localStorage cache immediately (zero wait) ──
     const cached = loadLocal(uid)
     if (cached) {
       applyPrefs(mergeWithDefaults(cached))
-      setLoading(false)
+      setLoading(false)   // UI is ready — show real content right away
+    } else {
+      setLoading(true)    // No cache — show skeleton until Firestore responds
     }
 
+    // ── Step 2: Sync from Firestore in the background ──
     setSyncing(true)
     getUserPreferences(uid)
       .then(res => {
         if (res.success && res.data && Object.keys(res.data).length > 0) {
           const p = mergeWithDefaults(res.data)
           applyPrefs(p)
-          saveLocal(uid, p)
+          saveLocal(uid, p)   // update cache for next visit
         }
         fetchedForUid.current = uid
       })
       .catch(() => { fetchedForUid.current = uid })
       .finally(() => {
         setSyncing(false)
-        setLoading(false)
+        setLoading(false)   // always clear skeleton after Firestore responds
       })
   }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -321,46 +319,40 @@ export default function Alerts() {
   }
 
   /* ── Save ─────────────────────────────────────────────────────── */
-  // FIX: Wrapped in withTimeout(12s) so it can NEVER hang forever.
-  // Firestore save is awaited; backend notify is fire-and-forget (already handled in firebase.js).
+  // FIX: No more withTimeout() wrapper — subscribeToAlerts already handles
+  // its own timeout internally (AbortController on fetch, Firestore is direct).
+  // The old withTimeout was killing the Firestore write prematurely.
   const handleSave = async () => {
     if (!uid)                       { showToast('Not logged in', 'error'); return }
     if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
 
     const prefs = buildPrefs(true)
 
-    setSubscribed(true)
     setBtnState('saving')
 
     try {
-      const result = await withTimeout(
-        subscribeToAlerts(uid, {
-          magnitude,
-          selectedMagnitudes,
-          radius,
-          lat,
-          lon,
-          locationName,
-        }),
-        12000  // 12 second hard ceiling
-      )
+      const result = await subscribeToAlerts(uid, {
+        magnitude,
+        selectedMagnitudes,
+        radius,
+        lat,
+        lon,
+        locationName,
+      })
 
       if (result.success) {
+        setSubscribed(true)
         saveLocal(uid, prefs)
         setBtnState('saved')
         setTimeout(() => setBtnState('idle'), 2500)
         showToast(` Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
       } else {
-        setSubscribed(false)
         setBtnState('idle')
-        showToast('Failed to save — please try again', 'error')
+        showToast(result.error || 'Failed to save — please try again', 'error')
       }
     } catch (err) {
-      // Catches both real errors and our timeout
-      const timedOut = err?.message === 'Request timed out'
-      setSubscribed(false)
       setBtnState('idle')
-      showToast(timedOut ? 'Save timed out — please try again' : 'Failed to save — please try again', 'error')
+      showToast('Failed to save — please try again', 'error')
     }
   }
 
@@ -458,7 +450,7 @@ export default function Alerts() {
           </div>
           <div style={{ color: '#5a7a99', fontSize: 11, marginTop: 2 }}>
             {subscribed
-              ? `${selectedMagnitudes.join(', ')} · ${radius} km ·  ${locationName}`
+              ? `${selectedMagnitudes.join(', ')} · ${radius} km · ${locationName}`
               : 'Configure settings and click Enable Alerts'}
           </div>
         </div>
@@ -518,7 +510,7 @@ export default function Alerts() {
                 color: allSelected ? '#00c8ff' : '#5a7a99',
                 transition: 'all 0.2s', letterSpacing: '0.05em', textTransform: 'uppercase',
               }}>
-                {allSelected ? '✓ All' : 'Select All'}
+                {allSelected ? ' All' : 'Select All'}
               </button>
             </div>
 
@@ -540,7 +532,7 @@ export default function Alerts() {
                       border: `1.5px solid ${active ? m.color : 'rgba(255,255,255,0.1)'}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 8, color: '#000', fontWeight: 900, transition: 'all 0.18s',
-                    }}>{active ? '✓' : ''}</div>
+                    }}>{active ? '' : ''}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{
                         width: 8, height: 8, borderRadius: '50%', background: m.color,
@@ -644,7 +636,7 @@ export default function Alerts() {
               borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? '📡 Detecting…' : ' Use My Current Location'}
+              {geoLoading ? ' Detecting…' : ' Use My Current Location'}
             </button>
 
             <div style={{
@@ -696,29 +688,34 @@ export default function Alerts() {
 
           {/* Action buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button onClick={handleSave} disabled={!canSave || btnState === 'saving'} style={{
-              width: '100%', padding: '14px', border: 'none', borderRadius: 10,
-              background: btnState === 'saved'
-                ? 'linear-gradient(135deg,#00aa55,#007733)'
-                : btnState === 'saving'
-                  ? 'rgba(0,200,255,0.3)'
-                  : !canSave
-                    ? 'rgba(255,255,255,0.05)'
-                    : 'linear-gradient(135deg,#00c8ff,#0077aa)',
-              color: !canSave ? '#3a5a79' : '#fff',
-              fontSize: 14, fontWeight: 700,
-              cursor: (!canSave || btnState === 'saving') ? 'not-allowed' : 'pointer',
-              transition: 'background 0.3s',
-              boxShadow: canSave ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
-            }}>
+            <button
+              onClick={handleSave}
+              disabled={!canSave || btnState === 'saving'}
+              style={{
+                width: '100%', padding: '14px', border: 'none', borderRadius: 10,
+                background: btnState === 'saved'
+                  ? 'linear-gradient(135deg,#00aa55,#007733)'
+                  : btnState === 'saving'
+                    ? 'rgba(0,200,255,0.3)'
+                    : !canSave
+                      ? 'rgba(255,255,255,0.05)'
+                      : 'linear-gradient(135deg,#00c8ff,#0077aa)',
+                color: !canSave ? '#3a5a79' : '#fff',
+                fontSize: 14, fontWeight: 700,
+                cursor: (!canSave || btnState === 'saving') ? 'not-allowed' : 'pointer',
+                transition: 'background 0.3s',
+                boxShadow: canSave ? '0 4px 16px rgba(0,200,255,0.2)' : 'none',
+              }}
+            >
               {btnState === 'saved'
                 ? ' Saved!'
                 : btnState === 'saving'
-                  ? ' Saving…'
+                  ? '⟳ Saving…'
                   : subscribed
                     ? ' Update Settings'
                     : ' Enable Alerts'}
             </button>
+
             {subscribed && (
               <button onClick={handleDisable} style={{
                 width: '100%', padding: '12px', background: 'transparent',
