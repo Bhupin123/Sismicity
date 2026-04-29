@@ -540,7 +540,7 @@ Push to GitHub — Vercel auto-deploys from the `main` branch. Add all `VITE_*` 
 
 - Email: [bhupin.thapa.magar@gmail.com](mailto:bhupin.thapa.magar@gmail.com)
 - GitHub: [@Bhupin123](https://github.com/Bhupin123)
-- Live Site: [bhupin123.github.io/Sismicity](https://bhupin123.github.io/Sismicity/)
+- Live Site: [SeismoIQ](https://seismoiq.vercel.app)
 
 ---
 
