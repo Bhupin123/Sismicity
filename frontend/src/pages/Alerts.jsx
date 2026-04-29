@@ -36,7 +36,7 @@ const RADIUS_PRESETS = [
   { label: '1000 km', value: 1000, desc: 'Continental' },
 ]
 
-/* ── Defaults (Kathmandu — updated to user's actual location) ───── */
+/* ── Defaults (Kathmandu) ───────────────────────────────────────── */
 const DEFAULTS = {
   alertsEnabled:      false,
   alertMagnitude:     5.0,
@@ -53,13 +53,16 @@ const saveLocal  = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.st
 const loadLocal  = (uid)    => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
 const clearLocal = (uid)    => { try { localStorage.removeItem(LS_KEY(uid)) } catch {} }
 
-/* ── Reverse geocode ────────────────────────────────────────────── */
+/* ── Reverse geocode — FIX 4: 8s timeout so it never hangs ─────── */
 const reverseGeocode = async (lat, lon) => {
   try {
+    const controller = new AbortController()
+    const timer      = setTimeout(() => controller.abort(), 8000)
     const res  = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
-      { headers: { 'Accept-Language': 'en' } }
+      { headers: { 'Accept-Language': 'en' }, signal: controller.signal }
     )
+    clearTimeout(timer)
     const data = await res.json()
     const city =
       data.address?.city    ||
@@ -77,6 +80,7 @@ const reverseGeocode = async (lat, lon) => {
 }
 
 /* ── Auto-detect location silently on first load ────────────────── */
+// FIX 1: timeout raised from 5s → 15s for mobile/slow GPS in Nepal
 const detectLocation = () =>
   new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null)
@@ -86,7 +90,7 @@ const detectLocation = () =>
         lon: parseFloat(pos.coords.longitude.toFixed(4)),
       }),
       () => resolve(null),
-      { timeout: 5000, maximumAge: 60000 }
+      { timeout: 15000, maximumAge: 60000 }
     )
   })
 
@@ -231,6 +235,8 @@ export default function Alerts() {
 
   const fetchedForUid = useRef(null)
   const prevUid       = useRef(null)
+  // FIX 2: ref to track manual geo timeout so we can clear it
+  const geoTimerRef   = useRef(null)
 
   const applyPrefs = (p) => {
     setSubscribed(p.alertsEnabled)
@@ -241,6 +247,11 @@ export default function Alerts() {
     setLon(p.userLon)
     setLocationName(p.locationName)
   }
+
+  // Cleanup geo timer on unmount
+  useEffect(() => {
+    return () => { if (geoTimerRef.current) clearTimeout(geoTimerRef.current) }
+  }, [])
 
   // ── Load preferences + auto-detect location if none saved ────────
   useEffect(() => {
@@ -331,11 +342,20 @@ export default function Alerts() {
     )
 
   /* ── Manual location detect ───────────────────────────────────── */
+  // FIX 2: hard 15s fallback timer so geoLoading can never get stuck forever
   const handleGetLocation = () => {
     if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return }
     setGeoLoading(true)
+
+    // Safety net: if geolocation doesn't resolve within 15s, unblock the button
+    geoTimerRef.current = setTimeout(() => {
+      setGeoLoading(false)
+      showToast('Location timed out — try again', 'error')
+    }, 15000)
+
     navigator.geolocation.getCurrentPosition(
       async pos => {
+        clearTimeout(geoTimerRef.current)
         const newLat = parseFloat(pos.coords.latitude.toFixed(4))
         const newLon = parseFloat(pos.coords.longitude.toFixed(4))
         setLat(newLat)
@@ -344,15 +364,19 @@ export default function Alerts() {
         const displayName = name || `${newLat}, ${newLon}`
         setLocationName(displayName)
         setGeoLoading(false)
-        showToast(` ${displayName}`)
+        showToast(`📍 ${displayName}`)
       },
-      () => { setGeoLoading(false); showToast('Could not get location', 'error') }
+      () => {
+        clearTimeout(geoTimerRef.current)
+        setGeoLoading(false)
+        showToast('Could not get location', 'error')
+      },
+      { timeout: 15000, maximumAge: 60000 }
     )
   }
 
   /* ── Save ─────────────────────────────────────────────────────── */
-  // NOTE: No withTimeout() here — firebase.js already has an 8s hard timeout
-  // on the Firestore write itself, and 15s on the backend fetch.
+  // firebase.js handles retries (3x) + 20s timeout internally
   const handleSave = async () => {
     if (!uid)                       { showToast('Not logged in', 'error'); return }
     if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
@@ -374,7 +398,7 @@ export default function Alerts() {
         saveLocal(uid, buildPrefs(true))
         setBtnState('saved')
         setTimeout(() => setBtnState('idle'), 2500)
-        showToast(` Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
+        showToast(`✅ Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
       } else {
         setBtnState('error')
         setTimeout(() => setBtnState('idle'), 3000)
@@ -417,10 +441,10 @@ export default function Alerts() {
   }[btnState] || 'linear-gradient(135deg,#00c8ff,#0077aa)'
 
   const btnLabel = {
-    saved:  ' Saved!',
-    saving: ' Saving…',
-    error:  ' Failed — try again',
-    idle:   subscribed ? ' Update Settings' : ' Enable Alerts',
+    saved:  '✅ Saved!',
+    saving: '⏳ Saving…',
+    error:  '❌ Failed — try again',
+    idle:   subscribed ? '🔔 Update Settings' : '🔔 Enable Alerts',
   }[btnState]
 
   /* ── Skeleton ─────────────────────────────────────────────────── */
@@ -478,7 +502,7 @@ export default function Alerts() {
         <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Alert Settings</h1>
         <p style={{ color: '#5a7a99', fontSize: 13, margin: 0 }}>
           Settings saved to your account — syncs across all devices
-          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}> Syncing…</span>}
+          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing…</span>}
         </p>
       </div>
 
@@ -555,7 +579,7 @@ export default function Alerts() {
                 color: allSelected ? '#00c8ff' : '#5a7a99',
                 transition: 'all 0.2s', letterSpacing: '0.05em', textTransform: 'uppercase',
               }}>
-                {allSelected ? ' All' : 'Select All'}
+                {allSelected ? '✓ All' : 'Select All'}
               </button>
             </div>
 
@@ -577,7 +601,7 @@ export default function Alerts() {
                       border: `1.5px solid ${active ? m.color : 'rgba(255,255,255,0.1)'}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       fontSize: 8, color: '#000', fontWeight: 900, transition: 'all 0.18s',
-                    }}>{active ? '' : ''}</div>
+                    }}>{active ? '✓' : ''}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{
                         width: 8, height: 8, borderRadius: '50%', background: m.color,
@@ -681,7 +705,7 @@ export default function Alerts() {
               borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? ' Detecting…' : ' Use My Current Location'}
+              {geoLoading ? '⏳ Detecting…' : '📍 Use My Current Location'}
             </button>
 
             <div style={{
@@ -689,7 +713,7 @@ export default function Alerts() {
               background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.10)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{ fontSize: 15 }}></span>
+                <span style={{ fontSize: 15 }}>📍</span>
                 <span style={{ color: '#c0dff0', fontSize: 13, fontWeight: 600 }}>{locationName}</span>
               </div>
               <div style={{ display: 'flex', gap: 20, paddingLeft: 24 }}>

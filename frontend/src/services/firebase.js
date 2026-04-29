@@ -13,9 +13,7 @@ import {
   RecaptchaVerifier,
 } from 'firebase/auth';
 import {
-  initializeFirestore,
-  persistentLocalCache,
-  persistentSingleTabManager,   // ← FIXED: was persistentMultipleTabManager
+  getFirestore,
   doc,
   setDoc,
   getDoc,
@@ -41,23 +39,35 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 
-// ── FIXED: persistentSingleTabManager never blocks on an IndexedDB lock.
-// persistentMultipleTabManager acquires a shared lock across tabs.
-// If another tab holds the lock (or it's stale), setDoc() hangs indefinitely.
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({
-    tabManager: persistentSingleTabManager(),
-  }),
-});
+// FIX 1: Use plain getFirestore() — no IndexedDB / persistentLocalCache.
+// persistentLocalCache with IndexedDB caused lock-related write hangs.
+// Alerts.jsx already handles offline caching via localStorage, so nothing is lost.
+export const db = getFirestore(app);
 
-// ── Hard timeout wrapper for Firestore writes only ────────────────────────
-const withFirestoreTimeout = (promise, ms = 8000) =>
+// FIX 2: Timeout raised to 20s (Nepal latency + Render cold-start headroom)
+const withFirestoreTimeout = (promise, ms = 20000) =>
   Promise.race([
     promise,
     new Promise((_, reject) =>
       setTimeout(() => reject(new Error('FIRESTORE_TIMEOUT')), ms)
     ),
   ]);
+
+// FIX 3: Auto-retry wrapper — up to `attempts` tries with exponential backoff
+const withRetry = async (fn, attempts = 3, delayMs = 1000) => {
+  let lastError;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (i < attempts - 1) {
+        await new Promise(r => setTimeout(r, delayMs * Math.pow(2, i)));
+      }
+    }
+  }
+  throw lastError;
+};
 
 // ══════════════════════════════════════════════════════════════════
 //  RECAPTCHA
@@ -218,7 +228,9 @@ export const onAuthChange = (callback) => onAuthStateChanged(auth, callback);
 
 export const getUserPreferences = async (userId) => {
   try {
-    const snap = await getDoc(doc(db, 'users', userId));
+    // FIX 4: Wrap Firestore READ with 20s timeout — prevents load useEffect
+    // from hanging forever on a slow/dropped connection.
+    const snap = await withFirestoreTimeout(getDoc(doc(db, 'users', userId)), 20000);
     if (snap.exists()) return { success: true, data: snap.data() };
     return { success: false, error: 'User not found' };
   } catch (error) {
@@ -228,10 +240,13 @@ export const getUserPreferences = async (userId) => {
 
 export const updateUserPreferences = async (userId, preferences) => {
   try {
-    await withFirestoreTimeout(
-      setDoc(doc(db, 'users', userId),
-        { ...preferences, updatedAt: new Date().toISOString() },
-        { merge: true }
+    await withRetry(() =>
+      withFirestoreTimeout(
+        setDoc(doc(db, 'users', userId),
+          { ...preferences, updatedAt: new Date().toISOString() },
+          { merge: true }
+        ),
+        20000
       )
     );
     return { success: true };
@@ -243,9 +258,9 @@ export const updateUserPreferences = async (userId, preferences) => {
 // ══════════════════════════════════════════════════════════════════
 //  ALERT SUBSCRIPTIONS
 //
-//  1. Firestore write — 8s hard timeout (singleTabManager makes this ~300ms normally)
+//  1. Firestore write — 20s hard timeout, up to 3 auto-retries
 //  2. Fire-and-forget POST to Render backend for SendGrid email
-//     15s AbortController — Render free tier cold starts ~30s, never block UI
+//     FIX 5: Abort raised to 90s — Render free tier cold-starts can take 60s
 // ══════════════════════════════════════════════════════════════════
 
 export const subscribeToAlerts = async (userId, alertSettings) => {
@@ -261,17 +276,19 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
       updatedAt:          new Date().toISOString(),
     };
 
-    // ── Step 1: Save to Firestore with hard 8s timeout ────────────
-    await withFirestoreTimeout(
-      setDoc(doc(db, 'users', userId), prefsToSave, { merge: true }),
-      8000
+    // FIX 6: Retry Firestore write up to 3x with exponential backoff
+    await withRetry(() =>
+      withFirestoreTimeout(
+        setDoc(doc(db, 'users', userId), prefsToSave, { merge: true }),
+        20000
+      )
     );
 
-    // ── Step 2: Notify backend for SendGrid (fire-and-forget) ──────
+    // Fire-and-forget backend call — 90s abort for Render cold-start tolerance
     const user = auth.currentUser;
     if (user) {
       const ctrl    = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 15000);
+      const timeout = setTimeout(() => ctrl.abort(), 90000);
       fetch(`${API_URL}/api/alerts/subscribe`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -303,15 +320,17 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
 
 export const unsubscribeFromAlerts = async (userId) => {
   try {
-    await withFirestoreTimeout(
-      setDoc(doc(db, 'users', userId),
-        { alertsEnabled: false, updatedAt: new Date().toISOString() },
-        { merge: true }
-      ),
-      8000
+    await withRetry(() =>
+      withFirestoreTimeout(
+        setDoc(doc(db, 'users', userId),
+          { alertsEnabled: false, updatedAt: new Date().toISOString() },
+          { merge: true }
+        ),
+        20000
+      )
     );
     const ctrl    = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 15000);
+    const timeout = setTimeout(() => ctrl.abort(), 90000);
     fetch(`${API_URL}/api/alerts/unsubscribe`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
