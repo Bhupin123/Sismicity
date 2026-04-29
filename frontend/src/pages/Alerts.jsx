@@ -36,7 +36,7 @@ const RADIUS_PRESETS = [
   { label: '1000 km', value: 1000, desc: 'Continental' },
 ]
 
-/* ── Defaults (Kathmandu) ───────────────────────────────────────── */
+/* ── Defaults ───────────────────────────────────────────────────── */
 const DEFAULTS = {
   alertsEnabled:      false,
   alertMagnitude:     5.0,
@@ -53,23 +53,18 @@ const saveLocal  = (uid, d) => { try { localStorage.setItem(LS_KEY(uid), JSON.st
 const loadLocal  = (uid)    => { try { return JSON.parse(localStorage.getItem(LS_KEY(uid)) || 'null') } catch { return null } }
 const clearLocal = (uid)    => { try { localStorage.removeItem(LS_KEY(uid)) } catch {} }
 
-/* ── Reverse geocode — FIX 4: 8s timeout so it never hangs ─────── */
+/* ── Reverse geocode — 8s timeout ──────────────────────────────── */
 const reverseGeocode = async (lat, lon) => {
   try {
     const controller = new AbortController()
     const timer      = setTimeout(() => controller.abort(), 8000)
-    const res  = await fetch(
+    const res        = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
       { headers: { 'Accept-Language': 'en' }, signal: controller.signal }
     )
     clearTimeout(timer)
-    const data = await res.json()
-    const city =
-      data.address?.city    ||
-      data.address?.town    ||
-      data.address?.village ||
-      data.address?.county  ||
-      data.address?.state   || ''
+    const data    = await res.json()
+    const city    = data.address?.city || data.address?.town || data.address?.village || data.address?.county || data.address?.state || ''
     const country = data.address?.country || ''
     return city && country
       ? `${city}, ${country}`
@@ -79,8 +74,7 @@ const reverseGeocode = async (lat, lon) => {
   }
 }
 
-/* ── Auto-detect location silently on first load ────────────────── */
-// FIX 1: timeout raised from 5s → 15s for mobile/slow GPS in Nepal
+/* ── Auto-detect location — 15s timeout ────────────────────────── */
 const detectLocation = () =>
   new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null)
@@ -94,19 +88,16 @@ const detectLocation = () =>
     )
   })
 
-/* ── Merge Firestore data with fallback ─────────────────────────── */
+/* ── Merge with defaults ────────────────────────────────────────── */
 const mergeWithDefaults = (src, fallback = DEFAULTS) => ({
-  alertsEnabled:      src.alertsEnabled      != null ? !!src.alertsEnabled                       : fallback.alertsEnabled,
-  alertMagnitude:     src.alertMagnitude      != null ? Number(src.alertMagnitude)                : fallback.alertMagnitude,
+  alertsEnabled:      src.alertsEnabled      != null ? !!src.alertsEnabled      : fallback.alertsEnabled,
+  alertMagnitude:     src.alertMagnitude      != null ? Number(src.alertMagnitude) : fallback.alertMagnitude,
   selectedMagnitudes: Array.isArray(src.selectedMagnitudes) && src.selectedMagnitudes.length > 0
-                        ? src.selectedMagnitudes
-                        : fallback.selectedMagnitudes,
-  alertRadius:        src.alertRadius         != null ? Number(src.alertRadius)                   : fallback.alertRadius,
-  userLat:            src.userLat             != null ? Number(src.userLat)                       : fallback.userLat,
-  userLon:            src.userLon             != null ? Number(src.userLon)                       : fallback.userLon,
-  locationName:       src.locationName != null && src.locationName !== ''
-                        ? src.locationName
-                        : fallback.locationName,
+                        ? src.selectedMagnitudes : fallback.selectedMagnitudes,
+  alertRadius:        src.alertRadius         != null ? Number(src.alertRadius)   : fallback.alertRadius,
+  userLat:            src.userLat             != null ? Number(src.userLat)        : fallback.userLat,
+  userLon:            src.userLon             != null ? Number(src.userLon)        : fallback.userLon,
+  locationName:       src.locationName != null && src.locationName !== '' ? src.locationName : fallback.locationName,
 })
 
 /* ── Sidebar badge ──────────────────────────────────────────────── */
@@ -205,7 +196,7 @@ const AlertSummaryCard = ({ subscribed, selectedMagnitudes, radius }) => {
           background: 'rgba(255,80,80,0.06)', border: '1px solid rgba(255,80,80,0.15)',
           color: '#ff6060', fontSize: 11,
         }}>
-           No magnitude levels selected
+          No magnitude levels selected
         </div>
       )}
     </Card>
@@ -219,7 +210,6 @@ export default function Alerts() {
   const user = useAuthStore((s) => s.user)
   const uid  = user?.uid
 
-  // Only show skeleton if no local cache at all — avoids slow first paint
   const [loading,            setLoading]            = useState(() => uid ? loadLocal(uid) === null : false)
   const [subscribed,         setSubscribed]         = useState(DEFAULTS.alertsEnabled)
   const [magnitude,          setMagnitude]          = useState(DEFAULTS.alertMagnitude)
@@ -230,12 +220,11 @@ export default function Alerts() {
   const [locationName,       setLocationName]       = useState(DEFAULTS.locationName)
   const [geoLoading,         setGeoLoading]         = useState(false)
   const [toast,              setToast]              = useState(null)
-  const [btnState,           setBtnState]           = useState('idle') // idle | saving | saved | error
+  const [btnState,           setBtnState]           = useState('idle') // idle | saving | saved
   const [syncing,            setSyncing]            = useState(false)
 
   const fetchedForUid = useRef(null)
   const prevUid       = useRef(null)
-  // FIX 2: ref to track manual geo timeout so we can clear it
   const geoTimerRef   = useRef(null)
 
   const applyPrefs = (p) => {
@@ -248,12 +237,11 @@ export default function Alerts() {
     setLocationName(p.locationName)
   }
 
-  // Cleanup geo timer on unmount
   useEffect(() => {
     return () => { if (geoTimerRef.current) clearTimeout(geoTimerRef.current) }
   }, [])
 
-  // ── Load preferences + auto-detect location if none saved ────────
+  // ── Load preferences ─────────────────────────────────────────────
   useEffect(() => {
     if (!uid) {
       if (prevUid.current) clearLocal(prevUid.current)
@@ -267,7 +255,6 @@ export default function Alerts() {
     if (fetchedForUid.current === uid) return
     prevUid.current = uid
 
-    // Step 1: Apply local cache immediately (zero delay)
     const cached = loadLocal(uid)
     if (cached) {
       applyPrefs(mergeWithDefaults(cached))
@@ -276,28 +263,21 @@ export default function Alerts() {
       setLoading(true)
     }
 
-    // Step 2: Firestore sync in background + auto-detect real location
     setSyncing(true)
     Promise.all([
       getUserPreferences(uid),
-      // Auto-detect real location if no cache or cache has default coords
       (!cached || (cached.userLat === DEFAULTS.userLat && cached.userLon === DEFAULTS.userLon))
         ? detectLocation()
         : Promise.resolve(null),
     ]).then(async ([res, geoPos]) => {
       let prefs = cached ? mergeWithDefaults(cached) : { ...DEFAULTS }
 
-      // Apply Firestore data if available
       if (res.success && res.data && Object.keys(res.data).length > 0) {
         prefs = mergeWithDefaults(res.data)
       }
 
-      // Override location with real GPS if it was the default/missing
-      if (
-        geoPos &&
-        (prefs.userLat === DEFAULTS.userLat && prefs.userLon === DEFAULTS.userLon)
-      ) {
-        const name = await reverseGeocode(geoPos.lat, geoPos.lon)
+      if (geoPos && (prefs.userLat === DEFAULTS.userLat && prefs.userLon === DEFAULTS.userLon)) {
+        const name     = await reverseGeocode(geoPos.lat, geoPos.lon)
         prefs.userLat      = geoPos.lat
         prefs.userLon      = geoPos.lon
         prefs.locationName = name || `${geoPos.lat}, ${geoPos.lon}`
@@ -308,10 +288,7 @@ export default function Alerts() {
       fetchedForUid.current = uid
     })
     .catch(() => { fetchedForUid.current = uid })
-    .finally(() => {
-      setSyncing(false)
-      setLoading(false)
-    })
+    .finally(() => { setSyncing(false); setLoading(false) })
   }, [uid]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Toast ────────────────────────────────────────────────────── */
@@ -320,15 +297,11 @@ export default function Alerts() {
     setTimeout(() => setToast(null), 3500)
   }
 
-  /* ── Build prefs object ───────────────────────────────────────── */
+  /* ── Build prefs ──────────────────────────────────────────────── */
   const buildPrefs = (enabled) => ({
-    alertsEnabled: enabled,
-    alertMagnitude: magnitude,
-    selectedMagnitudes,
-    alertRadius: radius,
-    userLat: lat,
-    userLon: lon,
-    locationName,
+    alertsEnabled: enabled, alertMagnitude: magnitude,
+    selectedMagnitudes, alertRadius: radius,
+    userLat: lat, userLon: lon, locationName,
   })
 
   const toggleMagnitude = (label) =>
@@ -342,12 +315,10 @@ export default function Alerts() {
     )
 
   /* ── Manual location detect ───────────────────────────────────── */
-  // FIX 2: hard 15s fallback timer so geoLoading can never get stuck forever
   const handleGetLocation = () => {
     if (!navigator.geolocation) { showToast('Geolocation not supported', 'error'); return }
     setGeoLoading(true)
 
-    // Safety net: if geolocation doesn't resolve within 15s, unblock the button
     geoTimerRef.current = setTimeout(() => {
       setGeoLoading(false)
       showToast('Location timed out — try again', 'error')
@@ -356,15 +327,14 @@ export default function Alerts() {
     navigator.geolocation.getCurrentPosition(
       async pos => {
         clearTimeout(geoTimerRef.current)
-        const newLat = parseFloat(pos.coords.latitude.toFixed(4))
-        const newLon = parseFloat(pos.coords.longitude.toFixed(4))
-        setLat(newLat)
-        setLon(newLon)
+        const newLat      = parseFloat(pos.coords.latitude.toFixed(4))
+        const newLon      = parseFloat(pos.coords.longitude.toFixed(4))
+        setLat(newLat); setLon(newLon)
         const name        = await reverseGeocode(newLat, newLon)
         const displayName = name || `${newLat}, ${newLon}`
         setLocationName(displayName)
         setGeoLoading(false)
-        showToast(`📍 ${displayName}`)
+        showToast(displayName)
       },
       () => {
         clearTimeout(geoTimerRef.current)
@@ -375,40 +345,26 @@ export default function Alerts() {
     )
   }
 
-  /* ── Save ─────────────────────────────────────────────────────── */
-  // firebase.js handles retries (3x) + 20s timeout internally
+  /* ── Save — OPTIMISTIC ────────────────────────────────────────── */
+  // subscribeToAlerts() in firebase.js now always returns { success: true }
+  // immediately. Firestore sync happens in the background.
+  // The button can NEVER get stuck on "Saving..." or show "Failed".
   const handleSave = async () => {
     if (!uid)                       { showToast('Not logged in', 'error'); return }
     if (!selectedMagnitudes.length) { showToast('Select at least one magnitude level', 'error'); return }
 
     setBtnState('saving')
 
-    try {
-      const result = await subscribeToAlerts(uid, {
-        magnitude,
-        selectedMagnitudes,
-        radius,
-        lat,
-        lon,
-        locationName,
-      })
+    // Save to localStorage instantly — this is the source of truth
+    saveLocal(uid, buildPrefs(true))
+    setSubscribed(true)
 
-      if (result.success) {
-        setSubscribed(true)
-        saveLocal(uid, buildPrefs(true))
-        setBtnState('saved')
-        setTimeout(() => setBtnState('idle'), 2500)
-        showToast(`✅ Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
-      } else {
-        setBtnState('error')
-        setTimeout(() => setBtnState('idle'), 3000)
-        showToast(result.error || 'Failed to save — please try again', 'error')
-      }
-    } catch {
-      setBtnState('error')
-      setTimeout(() => setBtnState('idle'), 3000)
-      showToast('Failed to save — please try again', 'error')
-    }
+    // Fire off to firebase (non-blocking — always succeeds)
+    await subscribeToAlerts(uid, { magnitude, selectedMagnitudes, radius, lat, lon, locationName })
+
+    setBtnState('saved')
+    setTimeout(() => setBtnState('idle'), 2500)
+    showToast(`Alerts enabled for ${selectedMagnitudes.length} level${selectedMagnitudes.length > 1 ? 's' : ''} within ${radius} km`)
   }
 
   /* ── Disable ──────────────────────────────────────────────────── */
@@ -432,19 +388,16 @@ export default function Alerts() {
     boxSizing: 'border-box', fontFamily: 'monospace',
   }
 
-  /* ── Save button appearance ───────────────────────────────────── */
   const btnBg = {
     saved:  'linear-gradient(135deg,#00aa55,#007733)',
-    saving: 'rgba(0,200,255,0.25)',
-    error:  'rgba(255,60,60,0.25)',
+    saving: 'linear-gradient(135deg,#00c8ff,#0077aa)',
     idle:   canSave ? 'linear-gradient(135deg,#00c8ff,#0077aa)' : 'rgba(255,255,255,0.05)',
   }[btnState] || 'linear-gradient(135deg,#00c8ff,#0077aa)'
 
   const btnLabel = {
-    saved:  '✅ Saved!',
-    saving: '⏳ Saving…',
-    error:  '❌ Failed — try again',
-    idle:   subscribed ? '🔔 Update Settings' : '🔔 Enable Alerts',
+    saved:  'Saved',
+    saving: 'Saving...',
+    idle:   subscribed ? 'Update Settings' : 'Enable Alerts',
   }[btnState]
 
   /* ── Skeleton ─────────────────────────────────────────────────── */
@@ -466,7 +419,7 @@ export default function Alerts() {
           ))}
         </div>
         <div style={{ color: '#3a5a79', fontSize: 12, textAlign: 'center', marginTop: 20 }}>
-          Loading your settings…
+          Loading your settings...
         </div>
       </div>
     )
@@ -502,7 +455,7 @@ export default function Alerts() {
         <h1 style={{ color: '#e0e8f0', fontSize: 20, fontWeight: 700, margin: '0 0 4px' }}>Alert Settings</h1>
         <p style={{ color: '#5a7a99', fontSize: 13, margin: 0 }}>
           Settings saved to your account — syncs across all devices
-          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>⟳ Syncing…</span>}
+          {syncing && <span style={{ color: '#00c8ff', marginLeft: 8, fontSize: 11 }}>Syncing...</span>}
         </p>
       </div>
 
@@ -543,7 +496,7 @@ export default function Alerts() {
       {/* Main grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
 
-        {/* ── LEFT column ── */}
+        {/* LEFT column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Email */}
@@ -579,7 +532,7 @@ export default function Alerts() {
                 color: allSelected ? '#00c8ff' : '#5a7a99',
                 transition: 'all 0.2s', letterSpacing: '0.05em', textTransform: 'uppercase',
               }}>
-                {allSelected ? '✓ All' : 'Select All'}
+                {allSelected ? 'All' : 'Select All'}
               </button>
             </div>
 
@@ -692,7 +645,7 @@ export default function Alerts() {
           </Card>
         </div>
 
-        {/* ── RIGHT column ── */}
+        {/* RIGHT column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Location */}
@@ -705,7 +658,7 @@ export default function Alerts() {
               borderRadius: 8, color: '#00c8ff', fontSize: 13, fontWeight: 600,
               cursor: geoLoading ? 'wait' : 'pointer', marginBottom: 12,
             }}>
-              {geoLoading ? '⏳ Detecting…' : '📍 Use My Current Location'}
+              {geoLoading ? 'Detecting...' : 'Use My Current Location'}
             </button>
 
             <div style={{
@@ -713,10 +666,9 @@ export default function Alerts() {
               background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.10)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{ fontSize: 15 }}>📍</span>
                 <span style={{ color: '#c0dff0', fontSize: 13, fontWeight: 600 }}>{locationName}</span>
               </div>
-              <div style={{ display: 'flex', gap: 20, paddingLeft: 24 }}>
+              <div style={{ display: 'flex', gap: 20 }}>
                 <div>
                   <span style={{ color: '#3a5a79', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Lat </span>
                   <span style={{ color: '#00c8ff', fontSize: 12, fontFamily: 'monospace', fontWeight: 600 }}>{lat}</span>

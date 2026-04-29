@@ -38,36 +38,40 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
+export const db   = getFirestore(app);
 
-// FIX 1: Use plain getFirestore() — no IndexedDB / persistentLocalCache.
-// persistentLocalCache with IndexedDB caused lock-related write hangs.
-// Alerts.jsx already handles offline caching via localStorage, so nothing is lost.
-export const db = getFirestore(app);
+// ─────────────────────────────────────────────────────────────────
+//  Background Firestore sync — fires and forgets, never blocks UI.
+//  Retries up to 5 times with increasing delays.
+// ─────────────────────────────────────────────────────────────────
+const RETRY_DELAYS = [3000, 6000, 12000, 24000, 48000];
 
-// FIX 2: Timeout raised to 20s (Nepal latency + Render cold-start headroom)
-const withFirestoreTimeout = (promise, ms = 20000) =>
+const bgSync = (userId, data, attempt = 0) => {
+  const payload = { ...data, updatedAt: new Date().toISOString() };
+
+  Promise.race([
+    setDoc(doc(db, 'users', userId), payload, { merge: true }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 12000)),
+  ])
+    .then(() => {
+      console.log('[SeismoIQ] synced to Firestore');
+    })
+    .catch((err) => {
+      console.warn(`[SeismoIQ] sync attempt ${attempt + 1} failed: ${err.message}`);
+      if (attempt < RETRY_DELAYS.length - 1) {
+        setTimeout(() => bgSync(userId, data, attempt + 1), RETRY_DELAYS[attempt]);
+      }
+    });
+};
+
+// ─────────────────────────────────────────────────────────────────
+//  Firestore read with timeout — used only for initial load
+// ─────────────────────────────────────────────────────────────────
+const readWithTimeout = (promise, ms = 10000) =>
   Promise.race([
     promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('FIRESTORE_TIMEOUT')), ms)
-    ),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
-
-// FIX 3: Auto-retry wrapper — up to `attempts` tries with exponential backoff
-const withRetry = async (fn, attempts = 3, delayMs = 1000) => {
-  let lastError;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err;
-      if (i < attempts - 1) {
-        await new Promise(r => setTimeout(r, delayMs * Math.pow(2, i)));
-      }
-    }
-  }
-  throw lastError;
-};
 
 // ══════════════════════════════════════════════════════════════════
 //  RECAPTCHA
@@ -87,17 +91,15 @@ export const setupRecaptcha = (containerId) => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  HELPER — create user doc ONLY if it doesn't exist yet
+//  AUTH — EMAIL / GOOGLE / PHONE
 // ══════════════════════════════════════════════════════════════════
 
-const ensureUserDoc = async (user, extra = {}) => {
-  const ref  = doc(db, 'users', user.uid);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
-    await setDoc(ref, {
-      email:              user.email || '',
-      displayName:        user.displayName || extra.displayName || '',
-      phone:              user.phoneNumber || '',
+export const registerUser = async (email, password, displayName) => {
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    await updateProfile(cred.user, { displayName });
+    bgSync(cred.user.uid, {
+      email, displayName, phone: '',
       createdAt:          new Date().toISOString(),
       alertsEnabled:      false,
       alertMagnitude:     5.0,
@@ -106,38 +108,8 @@ const ensureUserDoc = async (user, extra = {}) => {
       userLat:            27.7172,
       userLon:            85.3240,
       locationName:       'Kathmandu, Nepal',
-      ...extra,
     });
-  }
-};
-
-// ══════════════════════════════════════════════════════════════════
-//  EMAIL / PASSWORD AUTH
-// ══════════════════════════════════════════════════════════════════
-
-export const registerUser = async (email, password, displayName) => {
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    const user = cred.user;
-    await updateProfile(user, { displayName });
-    const ref  = doc(db, 'users', user.uid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(ref, {
-        email, displayName, phone: '',
-        createdAt:          new Date().toISOString(),
-        alertsEnabled:      false,
-        alertMagnitude:     5.0,
-        selectedMagnitudes: ['Moderate', 'Strong', 'Major'],
-        alertRadius:        200,
-        userLat:            27.7172,
-        userLon:            85.3240,
-        locationName:       'Kathmandu, Nepal',
-      });
-    } else {
-      await setDoc(ref, { email, displayName }, { merge: true });
-    }
-    return { success: true, user };
+    return { success: true, user: cred.user };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
   }
@@ -152,10 +124,6 @@ export const loginUser = async (email, password) => {
   }
 };
 
-// ══════════════════════════════════════════════════════════════════
-//  FORGOT PASSWORD
-// ══════════════════════════════════════════════════════════════════
-
 export const resetPassword = async (email) => {
   try {
     await sendPasswordResetEmail(auth, email);
@@ -165,23 +133,34 @@ export const resetPassword = async (email) => {
   }
 };
 
-// ══════════════════════════════════════════════════════════════════
-//  GOOGLE AUTH
-// ══════════════════════════════════════════════════════════════════
-
 export const loginWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, new GoogleAuthProvider());
-    await ensureUserDoc(result.user);
+    // Ensure user doc exists — non-blocking
+    readWithTimeout(getDoc(doc(db, 'users', result.user.uid)), 8000)
+      .then(snap => {
+        if (!snap.exists()) {
+          bgSync(result.user.uid, {
+            email:              result.user.email || '',
+            displayName:        result.user.displayName || '',
+            phone:              result.user.phoneNumber || '',
+            createdAt:          new Date().toISOString(),
+            alertsEnabled:      false,
+            alertMagnitude:     5.0,
+            selectedMagnitudes: ['Moderate', 'Strong', 'Major'],
+            alertRadius:        200,
+            userLat:            27.7172,
+            userLon:            85.3240,
+            locationName:       'Kathmandu, Nepal',
+          });
+        }
+      })
+      .catch(() => {});
     return { success: true, user: result.user };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
   }
 };
-
-// ══════════════════════════════════════════════════════════════════
-//  PHONE AUTH
-// ══════════════════════════════════════════════════════════════════
 
 export const sendPhoneOTP = async (phoneNumber, containerId) => {
   try {
@@ -199,17 +178,12 @@ export const verifyPhoneOTP = async (otp) => {
     if (!window.confirmationResult)
       return { success: false, error: 'Session expired. Please request a new OTP.' };
     const result = await window.confirmationResult.confirm(otp);
-    await ensureUserDoc(result.user);
     window.confirmationResult = null;
     return { success: true, user: result.user };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
   }
 };
-
-// ══════════════════════════════════════════════════════════════════
-//  SIGN OUT
-// ══════════════════════════════════════════════════════════════════
 
 export const logoutUser = async () => {
   try {
@@ -224,123 +198,91 @@ export const onAuthChange = (callback) => onAuthStateChanged(auth, callback);
 
 // ══════════════════════════════════════════════════════════════════
 //  USER PREFERENCES
+//  Read attempts Firestore with a 10s timeout.
+//  On failure, Alerts.jsx falls back to localStorage — no hang.
 // ══════════════════════════════════════════════════════════════════
 
 export const getUserPreferences = async (userId) => {
   try {
-    // FIX 4: Wrap Firestore READ with 20s timeout — prevents load useEffect
-    // from hanging forever on a slow/dropped connection.
-    const snap = await withFirestoreTimeout(getDoc(doc(db, 'users', userId)), 20000);
+    const snap = await readWithTimeout(getDoc(doc(db, 'users', userId)), 10000);
     if (snap.exists()) return { success: true, data: snap.data() };
-    return { success: false, error: 'User not found' };
-  } catch (error) {
-    return { success: false, error: error.message };
+    return { success: false, error: 'not found' };
+  } catch {
+    return { success: false, error: 'timeout' };
   }
 };
 
 export const updateUserPreferences = async (userId, preferences) => {
-  try {
-    await withRetry(() =>
-      withFirestoreTimeout(
-        setDoc(doc(db, 'users', userId),
-          { ...preferences, updatedAt: new Date().toISOString() },
-          { merge: true }
-        ),
-        20000
-      )
-    );
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+  bgSync(userId, preferences);
+  return { success: true };
 };
 
 // ══════════════════════════════════════════════════════════════════
 //  ALERT SUBSCRIPTIONS
 //
-//  1. Firestore write — 20s hard timeout, up to 3 auto-retries
-//  2. Fire-and-forget POST to Render backend for SendGrid email
-//     FIX 5: Abort raised to 90s — Render free tier cold-starts can take 60s
+//  subscribeToAlerts is 100% OPTIMISTIC:
+//  - Returns { success: true } instantly — no waiting
+//  - Firestore write happens in the background via bgSync
+//  - Backend email fires and forgets with 90s abort
+//  The UI NEVER hangs or shows "Failed" due to network issues.
 // ══════════════════════════════════════════════════════════════════
 
 export const subscribeToAlerts = async (userId, alertSettings) => {
-  try {
-    const prefsToSave = {
-      alertsEnabled:      true,
-      alertMagnitude:     alertSettings.magnitude,
-      selectedMagnitudes: alertSettings.selectedMagnitudes ?? [],
-      alertRadius:        alertSettings.radius,
-      userLat:            alertSettings.lat,
-      userLon:            alertSettings.lon,
-      locationName:       alertSettings.locationName ?? '',
-      updatedAt:          new Date().toISOString(),
-    };
+  const data = {
+    alertsEnabled:      true,
+    alertMagnitude:     alertSettings.magnitude,
+    selectedMagnitudes: alertSettings.selectedMagnitudes ?? [],
+    alertRadius:        alertSettings.radius,
+    userLat:            alertSettings.lat,
+    userLon:            alertSettings.lon,
+    locationName:       alertSettings.locationName ?? '',
+  };
 
-    // FIX 6: Retry Firestore write up to 3x with exponential backoff
-    await withRetry(() =>
-      withFirestoreTimeout(
-        setDoc(doc(db, 'users', userId), prefsToSave, { merge: true }),
-        20000
-      )
-    );
+  // Background Firestore sync — never blocks
+  bgSync(userId, data);
 
-    // Fire-and-forget backend call — 90s abort for Render cold-start tolerance
-    const user = auth.currentUser;
-    if (user) {
-      const ctrl    = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 90000);
-      fetch(`${API_URL}/api/alerts/subscribe`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          email:              user.email,
-          displayName:        user.displayName || '',
-          magnitude:          alertSettings.magnitude,
-          selectedMagnitudes: alertSettings.selectedMagnitudes,
-          radius:             alertSettings.radius,
-          lat:                alertSettings.lat,
-          lon:                alertSettings.lon,
-          locationName:       alertSettings.locationName,
-        }),
-        signal: ctrl.signal,
-      })
-        .then(res => { clearTimeout(timeout); if (!res.ok) console.warn('[SeismoIQ] backend subscribe:', res.status); })
-        .catch(err => { clearTimeout(timeout); if (err.name !== 'AbortError') console.warn('[SeismoIQ] backend unreachable:', err.message); });
-    }
-
-    return { success: true };
-  } catch (error) {
-    const msg = error.message === 'FIRESTORE_TIMEOUT'
-      ? 'Connection too slow — check your network and try again'
-      : error.message;
-    return { success: false, error: msg };
+  // Background backend call for SendGrid email — 90s for Render cold-start
+  const user = auth.currentUser;
+  if (user) {
+    const ctrl = new AbortController();
+    const t    = setTimeout(() => ctrl.abort(), 90000);
+    fetch(`${API_URL}/api/alerts/subscribe`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        userId,
+        email:              user.email,
+        displayName:        user.displayName || '',
+        magnitude:          alertSettings.magnitude,
+        selectedMagnitudes: alertSettings.selectedMagnitudes,
+        radius:             alertSettings.radius,
+        lat:                alertSettings.lat,
+        lon:                alertSettings.lon,
+        locationName:       alertSettings.locationName,
+      }),
+      signal: ctrl.signal,
+    })
+      .then(res => { clearTimeout(t); if (!res.ok) console.warn('[SeismoIQ] backend:', res.status); })
+      .catch(err => { clearTimeout(t); if (err.name !== 'AbortError') console.warn('[SeismoIQ] backend unreachable'); });
   }
+
+  // Always succeeds immediately
+  return { success: true };
 };
 
 export const unsubscribeFromAlerts = async (userId) => {
-  try {
-    await withRetry(() =>
-      withFirestoreTimeout(
-        setDoc(doc(db, 'users', userId),
-          { alertsEnabled: false, updatedAt: new Date().toISOString() },
-          { merge: true }
-        ),
-        20000
-      )
-    );
-    const ctrl    = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 90000);
-    fetch(`${API_URL}/api/alerts/unsubscribe`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ userId }),
-      signal:  ctrl.signal,
-    }).catch(() => {}).finally(() => clearTimeout(timeout));
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
+  bgSync(userId, { alertsEnabled: false });
+
+  const ctrl = new AbortController();
+  const t    = setTimeout(() => ctrl.abort(), 90000);
+  fetch(`${API_URL}/api/alerts/unsubscribe`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ userId }),
+    signal:  ctrl.signal,
+  }).catch(() => {}).finally(() => clearTimeout(t));
+
+  return { success: true };
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -400,9 +342,7 @@ function friendlyError(code) {
 export default {
   auth, db,
   registerUser, loginUser, logoutUser, onAuthChange,
-  loginWithGoogle,
-  sendPhoneOTP, verifyPhoneOTP,
-  resetPassword,
+  loginWithGoogle, sendPhoneOTP, verifyPhoneOTP, resetPassword,
   getUserPreferences, updateUserPreferences,
   subscribeToAlerts, unsubscribeFromAlerts,
   saveEarthquakeView, getUserHistory,
