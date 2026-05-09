@@ -11,6 +11,7 @@ import {
   getRedirectResult,
   GoogleAuthProvider,
   sendPasswordResetEmail,
+  sendEmailVerification,
   signInWithPhoneNumber,
   RecaptchaVerifier,
 } from 'firebase/auth';
@@ -67,7 +68,6 @@ const readWithTimeout = (promise, ms = 10000) =>
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
   ]);
 
-// Default user data for new accounts
 const defaultUserData = (user) => ({
   email:              user.email || '',
   displayName:        user.displayName || '',
@@ -83,45 +83,55 @@ const defaultUserData = (user) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────
-//  Detect browsers with strict tracking prevention
-//  Firefox, Safari, Brave block popups — use redirect for these
+//  Detect strict browsers (Firefox, Safari, Brave)
 // ─────────────────────────────────────────────────────────────────
 const isStrictBrowser = () => {
   const ua = navigator.userAgent;
-  const isSafari  = /Safari/.test(ua) && !/Chrome/.test(ua);
-  const isFirefox = /Firefox/.test(ua);
-  const isBrave   = navigator.brave !== undefined;
-  return isSafari || isFirefox || isBrave;
+  return (
+    (/Safari/.test(ua) && !/Chrome/.test(ua)) ||
+    /Firefox/.test(ua) ||
+    navigator.brave !== undefined
+  );
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  RECAPTCHA
+//  RECAPTCHA — completely rewritten to fix phone OTP issues
 // ══════════════════════════════════════════════════════════════════
 export const setupRecaptcha = (containerId) => {
+  // Always clear any existing verifier first
   if (window.recaptchaVerifier) {
     try { window.recaptchaVerifier.clear(); } catch (_) {}
     window.recaptchaVerifier = null;
   }
+
+  // Clear the container DOM contents so reCAPTCHA can re-inject
   const container = document.getElementById(containerId);
   if (!container) throw new Error(`reCAPTCHA container #${containerId} not found`);
+  container.innerHTML = '';
 
   window.recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
     size: 'invisible',
     callback: () => {},
-    'expired-callback': () => { window.recaptchaVerifier = null; },
+    'expired-callback': () => {
+      window.recaptchaVerifier = null;
+    },
   });
   return window.recaptchaVerifier;
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  AUTH — EMAIL
+//  AUTH — EMAIL with verification
 // ══════════════════════════════════════════════════════════════════
 export const registerUser = async (email, password, displayName) => {
   try {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName });
+    // Send verification email — blocks fake emails from being useful
+    await sendEmailVerification(cred.user);
     bgSync(cred.user.uid, { ...defaultUserData(cred.user), email, displayName, phone: '' });
-    return { success: true, user: cred.user };
+    // Sign out immediately — force them to verify first
+    await signOut(auth);
+    return { success: true, needsVerification: true };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
   }
@@ -130,6 +140,15 @@ export const registerUser = async (email, password, displayName) => {
 export const loginUser = async (email, password) => {
   try {
     const cred = await signInWithEmailAndPassword(auth, email, password);
+    // Block login if email not verified
+    if (!cred.user.emailVerified) {
+      await sendEmailVerification(cred.user); // resend in case they lost it
+      await signOut(auth);
+      return {
+        success: false,
+        error: 'Email not verified. A new verification link has been sent to your inbox.',
+      };
+    }
     return { success: true, user: cred.user };
   } catch (error) {
     return { success: false, error: friendlyError(error.code) };
@@ -146,20 +165,15 @@ export const resetPassword = async (email) => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  AUTH — GOOGLE
-//  Uses redirect for Firefox/Safari/Brave, popup for Chrome
+//  AUTH — GOOGLE (popup for Chrome, redirect for others)
 // ══════════════════════════════════════════════════════════════════
-
-// Call this once in App.jsx useEffect to catch the redirect result
 export const handleGoogleRedirectResult = async () => {
   try {
     const result = await getRedirectResult(auth);
     if (!result) return null;
-
     readWithTimeout(getDoc(doc(db, 'users', result.user.uid)), 8000)
       .then(snap => { if (!snap.exists()) bgSync(result.user.uid, defaultUserData(result.user)); })
       .catch(() => {});
-
     return { success: true, user: result.user };
   } catch (error) {
     console.error('[SeismoIQ] redirect result error:', error.code);
@@ -173,17 +187,14 @@ export const loginWithGoogle = async () => {
     provider.setCustomParameters({ prompt: 'select_account' });
 
     if (isStrictBrowser()) {
-      // Firefox / Safari / Brave — redirect to Google then back to app
       await signInWithRedirect(auth, provider);
       return { success: true, user: null, redirecting: true };
     }
 
-    // Chrome and standard browsers — use popup
     const result = await signInWithPopup(auth, provider);
     readWithTimeout(getDoc(doc(db, 'users', result.user.uid)), 8000)
       .then(snap => { if (!snap.exists()) bgSync(result.user.uid, defaultUserData(result.user)); })
       .catch(() => {});
-
     return { success: true, user: result.user };
   } catch (error) {
     console.error('[SeismoIQ] Google sign-in error:', error.code, error.message);
@@ -192,16 +203,19 @@ export const loginWithGoogle = async () => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  AUTH — PHONE OTP
+//  AUTH — PHONE OTP (fixed)
 // ══════════════════════════════════════════════════════════════════
 export const sendPhoneOTP = async (phoneNumber, containerId) => {
   try {
+    // Fresh verifier every time — fixes "already rendered" errors
     const appVerifier = setupRecaptcha(containerId);
+    // render() must complete before signInWithPhoneNumber
     await appVerifier.render();
     const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
     window.confirmationResult = confirmationResult;
     return { success: true };
   } catch (error) {
+    // Always clean up on failure so retry works
     if (window.recaptchaVerifier) {
       try { window.recaptchaVerifier.clear(); } catch (_) {}
       window.recaptchaVerifier = null;
@@ -266,22 +280,17 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
     locationName:       alertSettings.locationName ?? '',
   };
   bgSync(userId, data);
-
   const user = auth.currentUser;
   if (user) {
     const ctrl = new AbortController();
     const t    = setTimeout(() => ctrl.abort(), 90000);
     fetch(`${API_URL}/api/alerts/subscribe`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         userId, email: user.email, displayName: user.displayName || '',
-        magnitude:          alertSettings.magnitude,
-        selectedMagnitudes: alertSettings.selectedMagnitudes,
-        radius:             alertSettings.radius,
-        lat:                alertSettings.lat,
-        lon:                alertSettings.lon,
-        locationName:       alertSettings.locationName,
+        magnitude: alertSettings.magnitude, selectedMagnitudes: alertSettings.selectedMagnitudes,
+        radius: alertSettings.radius, lat: alertSettings.lat, lon: alertSettings.lon,
+        locationName: alertSettings.locationName,
       }),
       signal: ctrl.signal,
     })
@@ -296,10 +305,8 @@ export const unsubscribeFromAlerts = async (userId) => {
   const ctrl = new AbortController();
   const t    = setTimeout(() => ctrl.abort(), 90000);
   fetch(`${API_URL}/api/alerts/unsubscribe`, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ userId }),
-    signal:  ctrl.signal,
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }), signal: ctrl.signal,
   }).catch(() => {}).finally(() => clearTimeout(t));
   return { success: true };
 };
@@ -347,11 +354,11 @@ function friendlyError(code) {
     'auth/network-request-failed':    'Network error. Check your connection.',
     'auth/popup-closed-by-user':      'Sign-in popup was closed. Please try again.',
     'auth/cancelled-popup-request':   'Another sign-in is in progress.',
-    'auth/popup-blocked':             'Popup blocked by browser. Please allow popups for this site.',
+    'auth/popup-blocked':             'Popup blocked. Please allow popups for this site.',
     'auth/unauthorized-domain':       'This domain is not authorized in Firebase.',
     'auth/invalid-phone-number':      'Invalid phone number. Use format: +9771234567890',
     'auth/invalid-verification-code': 'Invalid OTP code. Please try again.',
-    'auth/code-expired':              'OTP has expired. Please request a new one.',
+    'auth/code-expired':              'OTP expired. Please request a new one.',
     'auth/missing-phone-number':      'Please enter a phone number.',
     'auth/quota-exceeded':            'SMS quota exceeded. Try again later.',
     'auth/captcha-check-failed':      'reCAPTCHA failed. Please refresh and try again.',
