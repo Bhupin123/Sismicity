@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { loginUser, loginWithGoogle, sendPhoneOTP, verifyPhoneOTP } from '../services/firebase'
+import { loginUser, loginWithGoogle, sendPhoneOTP, verifyPhoneOTP, resetPassword } from '../services/firebase'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import PhoneInput from 'react-phone-input-2'
@@ -102,25 +102,16 @@ export default function Login() {
     setLoading(false)
   }
 
-  // Forgot password — calls backend which uses Firebase Admin + SendGrid
+  // Forgot password — uses Firebase directly (reliable, no backend needed)
   const handleForgotPassword = async (e) => {
     e.preventDefault(); setError(''); setSuccess('')
     if (!forgotEmail.trim()) { setError('Please enter your email address.'); return }
     setLoading(true)
-    try {
-      const res = await fetch(`${API_URL}/api/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail.trim() }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setForgotSent(true)
-      } else {
-        setError(data.detail || 'Failed to send reset email. Please try again.')
-      }
-    } catch {
-      setError('Network error. Please check your connection.')
+    const result = await resetPassword(forgotEmail.trim())
+    if (result.success) {
+      setForgotSent(true)
+    } else {
+      setError(result.error)
     }
     setLoading(false)
   }
