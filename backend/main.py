@@ -5,7 +5,7 @@ Deployment-ready version (Render + Neon PostgreSQL)
 """
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -21,10 +21,74 @@ import json
 import requests
 from dotenv import load_dotenv
 
-# ══════════════════════════════════════════════════════════════════════
-#  LOAD ENVIRONMENT VARIABLES (works locally and on Render)
-# ══════════════════════════════════════════════════════════════════════
 load_dotenv()
+
+# ══════════════════════════════════════════════════════════════════════
+#  FIREBASE ADMIN SDK — for custom password reset emails
+# ══════════════════════════════════════════════════════════════════════
+import firebase_admin
+from firebase_admin import credentials, auth as admin_auth
+
+def init_firebase_admin():
+    if firebase_admin._apps:
+        return  # already initialized
+    # Option 1: service account JSON file (local dev)
+    key_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'serviceAccountKey.json')
+    if os.path.exists(key_path):
+        cred = credentials.Certificate(key_path)
+        firebase_admin.initialize_app(cred)
+        print(" Firebase Admin initialized from serviceAccountKey.json")
+        return
+    # Option 2: environment variable (Render deployment)
+    # Set FIREBASE_SERVICE_ACCOUNT env var on Render with the JSON content
+    sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT')
+    if sa_json:
+        import json as _json
+        cred = credentials.Certificate(_json.loads(sa_json))
+        firebase_admin.initialize_app(cred)
+        print(" Firebase Admin initialized from environment variable")
+        return
+    print("  Firebase Admin NOT initialized — password reset will be unavailable")
+
+init_firebase_admin()
+
+# ══════════════════════════════════════════════════════════════════════
+#  SENDGRID
+# ══════════════════════════════════════════════════════════════════════
+def send_reset_email_via_sendgrid(to_email: str, reset_link: str) -> bool:
+    try:
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail
+        sg = SendGridAPIClient(os.environ.get('SENDGRID_API_KEY'))
+        html = f"""
+        <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#0d1b2a;padding:32px;border-radius:12px;">
+          <h2 style="color:#00c8ff;margin:0 0 8px;">🌍 SeismoIQ</h2>
+          <p style="color:#e0e0e0;font-size:15px;">We received a request to reset your password.</p>
+          <p style="color:#e0e0e0;font-size:14px;">Click the button below — this link expires in <strong>1 hour</strong>.</p>
+          <a href="{reset_link}"
+             style="display:inline-block;margin:20px 0;padding:13px 28px;
+                    background:linear-gradient(135deg,#00c8ff,#0099cc);
+                    color:#fff;text-decoration:none;border-radius:8px;
+                    font-weight:700;font-size:15px;">
+            Reset My Password
+          </a>
+          <p style="color:#5a7a99;font-size:12px;margin-top:24px;">
+            If you didn't request this, you can safely ignore this email.<br>
+            — The SeismoIQ Team
+          </p>
+        </div>
+        """
+        msg = Mail(
+            from_email=(os.environ.get('SENDGRID_FROM_EMAIL', 'noreply@seismoiq.app'), 'SeismoIQ'),
+            to_emails=to_email,
+            subject='Reset your SeismoIQ password',
+            html_content=html,
+        )
+        sg.send(msg)
+        return True
+    except Exception as e:
+        print(f"SendGrid error: {e}")
+        return False
 
 # ══════════════════════════════════════════════════════════════════════
 #  CONFIGURATION
@@ -35,19 +99,13 @@ DB_CONFIG = {
     'user':     os.environ.get('DB_USERNAME', 'postgres'),
     'password': os.environ.get('DB_PASSWORD', 'admin'),
     'port':     int(os.environ.get('DB_PORT', 5432)),
-    'sslmode':  os.environ.get('DB_SSLMODE', 'prefer'),   # Neon requires 'require'
+    'sslmode':  os.environ.get('DB_SSLMODE', 'prefer'),
 }
 
-# Resolve ML models path relative to this file (works on any OS / server)
 _HERE = os.path.dirname(os.path.abspath(__file__))
-ML_MODELS_PATH = os.getenv(
-    'ML_MODELS_PATH',
-    os.path.join(_HERE, '..', 'ml')
-)
-ML_MODELS_PATH = os.path.normpath(ML_MODELS_PATH)
+ML_MODELS_PATH = os.path.normpath(os.getenv('ML_MODELS_PATH', os.path.join(_HERE, '..', 'ml')))
 sys.path.insert(0, ML_MODELS_PATH)
 
-# CORS origins — add your Vercel URL here once deployed
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
@@ -59,19 +117,19 @@ if _frontend_url:
     ALLOWED_ORIGINS.append(_frontend_url)
 
 # ══════════════════════════════════════════════════════════════════════
-#  ML MODELS - LOAD ON STARTUP
+#  ML MODELS
 # ══════════════════════════════════════════════════════════════════════
 ml_models = {}
 
 def load_ml_models():
     global ml_models
     files = {
-        'mag_model':   'magnitude_predictor.pkl',
-        'mag_scaler':  'magnitude_scaler.pkl',
-        'mag_features':'magnitude_features.pkl',
-        'cls_model':   'major_event_classifier.pkl',
-        'cls_scaler':  'classifier_scaler.pkl',
-        'cls_features':'classifier_features.pkl',
+        'mag_model':    'magnitude_predictor.pkl',
+        'mag_scaler':   'magnitude_scaler.pkl',
+        'mag_features': 'magnitude_features.pkl',
+        'cls_model':    'major_event_classifier.pkl',
+        'cls_scaler':   'classifier_scaler.pkl',
+        'cls_features': 'classifier_features.pkl',
     }
     for key, fname in files.items():
         path = os.path.join(ML_MODELS_PATH, fname)
@@ -81,9 +139,6 @@ def load_ml_models():
         else:
             print(f"  Not found: {path}")
 
-# ══════════════════════════════════════════════════════════════════════
-#  LIFESPAN
-# ══════════════════════════════════════════════════════════════════════
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_ml_models()
@@ -187,7 +242,10 @@ class AlertSubscription(BaseModel):
 class AlertUnsubscribe(BaseModel):
     userId: str
 
-# Store alert subscriptions (in-memory; resets on server restart)
+# ── NEW: password reset request model ──────────────────────────────
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+
 alert_subscriptions = {}
 
 # ══════════════════════════════════════════════════════════════════════
@@ -202,61 +260,52 @@ def build_features(data: dict) -> pd.DataFrame:
     rm    = data.get('rolling_mean_mag_30d', 4.5)
     dslm  = data.get('days_since_last_major', 30)
     now   = datetime.now()
-
     return pd.DataFrame([{
-        'depth':                    depth,
-        'lat':                      lat,
-        'lon':                      lon,
-        'rolling_count_7d':         r7,
-        'rolling_count_30d':        r30,
-        'rolling_mean_mag_30d':     rm,
-        'month_sin':                0.5,
-        'month_cos':                0.5,
-        'hour_sin':                 0.0,
-        'hour_cos':                 1.0,
-        'depth_squared':            depth ** 2,
-        'depth_cubed':              depth ** 3,
-        'mag_depth_interaction':    0.0,
-        'lat_lon_interaction':      lat * lon,
-        'lat_depth_interaction':    lat * depth,
-        'activity_ratio_7_30':      r7 / (r30 + 1),
-        'recent_activity_score':    r7 * rm,
-        'days_since_last_major':    dslm,
-        'days_since_last_major_log':np.log1p(dslm),
-        'recency_score':            1 / (dslm + 1),
-        'geo_cluster':              0,
-        'is_weekend':               0,
-        'day_of_year':              now.timetuple().tm_yday,
-        'quarter':                  (now.month - 1) // 3 + 1,
+        'depth':                     depth,
+        'lat':                       lat,
+        'lon':                       lon,
+        'rolling_count_7d':          r7,
+        'rolling_count_30d':         r30,
+        'rolling_mean_mag_30d':      rm,
+        'month_sin':                 0.5,
+        'month_cos':                 0.5,
+        'hour_sin':                  0.0,
+        'hour_cos':                  1.0,
+        'depth_squared':             depth ** 2,
+        'depth_cubed':               depth ** 3,
+        'mag_depth_interaction':     0.0,
+        'lat_lon_interaction':       lat * lon,
+        'lat_depth_interaction':     lat * depth,
+        'activity_ratio_7_30':       r7 / (r30 + 1),
+        'recent_activity_score':     r7 * rm,
+        'days_since_last_major':     dslm,
+        'days_since_last_major_log': np.log1p(dslm),
+        'recency_score':             1 / (dslm + 1),
+        'geo_cluster':               0,
+        'is_weekend':                0,
+        'day_of_year':               now.timetuple().tm_yday,
+        'quarter':                   (now.month - 1) // 3 + 1,
     }])
 
 
 def check_and_send_alerts(new_earthquake: dict):
-    """Check all subscriptions and send email alerts if criteria match."""
     try:
         from email_service import send_earthquake_alert
         eq_lat = new_earthquake.get('lat')
         eq_lon = new_earthquake.get('lon')
         eq_mag = new_earthquake.get('mag')
-
         if not all([eq_lat, eq_lon, eq_mag]):
             return
-
         from math import radians, sin, cos, sqrt, atan2
         for user_id, sub in alert_subscriptions.items():
             if eq_mag < sub['magnitude']:
                 continue
-
-            lat1, lon1 = radians(sub['lat']),  radians(sub['lon'])
-            lat2, lon2 = radians(eq_lat),       radians(eq_lon)
-            dlat = lat2 - lat1
-            dlon = lon2 - lon1
-            a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-            c = 2 * atan2(sqrt(a), sqrt(1 - a))
-            distance_km = 6371 * c
-
+            lat1, lon1 = radians(sub['lat']), radians(sub['lon'])
+            lat2, lon2 = radians(eq_lat),      radians(eq_lon)
+            dlat = lat2 - lat1; dlon = lon2 - lon1
+            a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+            distance_km = 6371 * 2 * atan2(sqrt(a), sqrt(1-a))
             if distance_km <= sub['radius']:
-                print(f" Sending alert to {sub['email']} — M{eq_mag} at {distance_km:.0f}km")
                 send_earthquake_alert(
                     sub['email'],
                     {**new_earthquake, 'distance_km': distance_km},
@@ -276,13 +325,11 @@ async def root():
 async def health_check():
     try:
         with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
+            conn.cursor().execute("SELECT 1")
         db_ok = True
     except Exception as e:
         print(f"DB health check failed: {e}")
         db_ok = False
-
     return {
         "status":      "online",
         "database":    db_ok,
@@ -293,64 +340,79 @@ async def health_check():
     }
 
 # ══════════════════════════════════════════════════════════════════════
+#  ENDPOINTS - AUTH (password reset via SendGrid)
+# ══════════════════════════════════════════════════════════════════════
+@app.post("/api/auth/reset-password")
+async def reset_password(req: ResetPasswordRequest):
+    """
+    Generate a Firebase password-reset link via Admin SDK,
+    then deliver it through SendGrid so it arrives in the inbox
+    (not spam) and comes from your own sender name.
+    """
+    if not firebase_admin._apps:
+        raise HTTPException(status_code=503, detail="Auth service unavailable.")
+
+    try:
+        # Will raise UserNotFoundError if email not registered
+        reset_link = admin_auth.generate_password_reset_link(req.email)
+    except admin_auth.UserNotFoundError:
+        # User-friendly: tell them the email isn't registered
+        raise HTTPException(status_code=404, detail="No account found with this email address.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not generate reset link: {e}")
+
+    ok = send_reset_email_via_sendgrid(req.email, reset_link)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to send email. Please try again.")
+
+    return {"success": True}
+
+# ══════════════════════════════════════════════════════════════════════
 #  ENDPOINTS - EARTHQUAKES
 # ══════════════════════════════════════════════════════════════════════
 @app.get("/api/earthquakes")
 async def get_earthquakes(
-    limit:    int            = Query(500, ge=1, le=5000),
-    offset:   int            = Query(0,   ge=0),
-    min_mag:  Optional[float] = None,
-    max_mag:  Optional[float] = None,
-    days_back:Optional[int]   = None,
-    is_major: Optional[bool]  = None
+    limit:     int            = Query(500, ge=1, le=5000),
+    offset:    int            = Query(0,   ge=0),
+    min_mag:   Optional[float] = None,
+    max_mag:   Optional[float] = None,
+    days_back: Optional[int]   = None,
+    is_major:  Optional[bool]  = None
 ):
     with get_db() as conn:
         cursor = conn.cursor()
         query  = "SELECT * FROM std_sismicity WHERE 1=1"
         params = []
-
-        if min_mag is not None:
-            query += " AND mag >= %s"; params.append(min_mag)
-        if max_mag is not None:
-            query += " AND mag <= %s"; params.append(max_mag)
-        if days_back is not None:
-            query += " AND dt >= NOW() - INTERVAL '%s days'"; params.append(days_back)
-        if is_major is not None:
-            query += " AND is_major = %s"; params.append(is_major)
-
-        count_q = query.replace("SELECT *", "SELECT COUNT(*)")
-        cursor.execute(count_q, params)
+        if min_mag  is not None: query += " AND mag >= %s";  params.append(min_mag)
+        if max_mag  is not None: query += " AND mag <= %s";  params.append(max_mag)
+        if days_back is not None: query += " AND dt >= NOW() - INTERVAL '%s days'"; params.append(days_back)
+        if is_major is not None: query += " AND is_major = %s"; params.append(is_major)
+        cursor.execute(query.replace("SELECT *", "SELECT COUNT(*)"), params)
         total = cursor.fetchone()['count']
-
         query += " ORDER BY dt DESC LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         cursor.execute(query, params)
-        results = cursor.fetchall()
-
-        return {"count": total, "results": [dict(row) for row in results]}
+        return {"count": total, "results": [dict(r) for r in cursor.fetchall()]}
 
 
 @app.get("/api/earthquakes/stats")
 async def get_stats(days_back: Optional[int] = None):
     with get_db() as conn:
         cursor = conn.cursor()
-        base = "FROM std_sismicity"
+        base  = "FROM std_sismicity"
         where = f" WHERE dt >= NOW() - INTERVAL '{days_back} days'" if days_back else ""
-
         cursor.execute(
             f"SELECT COUNT(*) as total, AVG(mag) as avg_mag, MAX(mag) as max_mag, "
             f"MIN(mag) as min_mag, AVG(depth) as avg_depth, "
             f"MIN(dt) as date_earliest, MAX(dt) as date_latest {base}{where}"
         )
         stats = dict(cursor.fetchone())
-
         cursor.execute(
             f"SELECT COUNT(*) FILTER (WHERE mag >= 5.5) as major, "
             f"COUNT(*) FILTER (WHERE mag >= 4 AND mag < 5.5) as moderate, "
             f"COUNT(*) FILTER (WHERE mag < 4) as minor {base}{where}"
         )
         cats = dict(cursor.fetchone())
-
         return {
             "total":          stats['total'] or 0,
             "avg_mag":        round(float(stats['avg_mag']   or 0), 2),
@@ -378,12 +440,9 @@ async def get_timeline(
             f"COUNT(*) as count, AVG(mag) as avg_mag, MAX(mag) as max_mag "
             f"FROM std_sismicity{where} GROUP BY period ORDER BY period"
         )
-        return [{
-            "period":  str(row['period'])[:10],
-            "count":   row['count'],
-            "avg_mag": round(float(row['avg_mag']), 2),
-            "max_mag": round(float(row['max_mag']), 2)
-        } for row in cursor.fetchall()]
+        return [{"period": str(r['period'])[:10], "count": r['count'],
+                 "avg_mag": round(float(r['avg_mag']), 2), "max_mag": round(float(r['max_mag']), 2)}
+                for r in cursor.fetchall()]
 
 
 @app.get("/api/earthquakes/by-location")
@@ -392,26 +451,20 @@ async def get_by_location(limit: int = Query(15, ge=1, le=50)):
         cursor = conn.cursor()
         cursor.execute(
             "SELECT place, COUNT(*) as count, AVG(mag) as avg_mag, MAX(mag) as max_mag "
-            "FROM std_sismicity GROUP BY place ORDER BY count DESC LIMIT %s",
-            (limit,)
+            "FROM std_sismicity GROUP BY place ORDER BY count DESC LIMIT %s", (limit,)
         )
-        return [dict(row) for row in cursor.fetchall()]
+        return [dict(r) for r in cursor.fetchall()]
 
 
 @app.get("/api/earthquakes/recent")
-async def get_recent(
-    hours: int = Query(24, ge=1, le=168),
-    limit: int = Query(20, ge=1, le=100)
-):
+async def get_recent(hours: int = Query(24, ge=1, le=168), limit: int = Query(20, ge=1, le=100)):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT * FROM std_sismicity "
-            "WHERE dt >= NOW() - INTERVAL '%s hours' "
-            "ORDER BY dt DESC LIMIT %s",
-            (hours, limit)
+            "SELECT * FROM std_sismicity WHERE dt >= NOW() - INTERVAL '%s hours' "
+            "ORDER BY dt DESC LIMIT %s", (hours, limit)
         )
-        return [dict(row) for row in cursor.fetchall()]
+        return [dict(r) for r in cursor.fetchall()]
 
 # ══════════════════════════════════════════════════════════════════════
 #  ENDPOINTS - USGS LIVE DATA FETCHING
@@ -424,88 +477,58 @@ async def fetch_usgs_data(
     try:
         end_time   = datetime.now()
         start_time = end_time - timedelta(days=days_back)
-
-        url = "https://earthquake.usgs.gov/fdsnws/event/1/query"
-        params = {
-            'format':       'geojson',
-            'starttime':    start_time.strftime('%Y-%m-%d'),
-            'endtime':      end_time.strftime('%Y-%m-%d'),
-            'minmagnitude': min_magnitude,
-            'orderby':      'time'
-        }
-
-        response = requests.get(url, params=params, timeout=30)
+        response   = requests.get(
+            "https://earthquake.usgs.gov/fdsnws/event/1/query",
+            params={'format': 'geojson', 'starttime': start_time.strftime('%Y-%m-%d'),
+                    'endtime': end_time.strftime('%Y-%m-%d'),
+                    'minmagnitude': min_magnitude, 'orderby': 'time'},
+            timeout=30
+        )
         response.raise_for_status()
         features = response.json().get('features', [])
         inserted = skipped = 0
 
         with get_db() as conn:
             cursor = conn.cursor()
-            for feature in features:
-                props  = feature['properties']
-                coords = feature['geometry']['coordinates']
+            for f in features:
+                props  = f['properties']
+                coords = f['geometry']['coordinates']
                 dt     = datetime.fromtimestamp(props['time'] / 1000)
                 mag    = props.get('mag')
-                depth  = coords[2] if len(coords) > 2 else 0
-                lat    = coords[1]
-                lon    = coords[0]
-                place  = props.get('place', 'Unknown')
-
-                if mag is None:
-                    skipped += 1
-                    continue
-
+                if mag is None: skipped += 1; continue
+                depth = coords[2] if len(coords) > 2 else 0
+                lat, lon, place = coords[1], coords[0], props.get('place', 'Unknown')
                 try:
                     cursor.execute(
-                        "SELECT COUNT(*) as c FROM std_sismicity "
-                        "WHERE dt = %s AND lat = %s AND lon = %s AND mag = %s",
+                        "SELECT COUNT(*) as c FROM std_sismicity WHERE dt=%s AND lat=%s AND lon=%s AND mag=%s",
                         (dt, lat, lon, mag)
                     )
-                    if cursor.fetchone()['c'] > 0:
-                        skipped += 1
-                        continue
-
+                    if cursor.fetchone()['c'] > 0: skipped += 1; continue
                     cursor.execute(
-                        "INSERT INTO std_sismicity "
-                        "(dt, mag, depth, lat, lon, place, is_major, source) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        "INSERT INTO std_sismicity (dt,mag,depth,lat,lon,place,is_major,source) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                         (dt, mag, depth, lat, lon, place, mag >= 5.5, 'USGS')
                     )
                     inserted += 1
                 except Exception as e:
-                    print(f"Insert error: {e}")
-                    skipped += 1
-
+                    print(f"Insert error: {e}"); skipped += 1
             conn.commit()
 
-        # Check alert subscriptions for newly inserted events
-        for feature in features:
-            props = feature['properties']
-            coords = feature['geometry']['coordinates']
-            mag = props.get('mag')
-            if mag is None:
-                continue
-            check_and_send_alerts({
-                'dt':    datetime.fromtimestamp(props['time'] / 1000),
-                'mag':   mag,
-                'depth': coords[2],
-                'lat':   coords[1],
-                'lon':   coords[0],
-                'place': props.get('place', 'Unknown')
-            })
+        for f in features:
+            props = f['properties']; coords = f['geometry']['coordinates']
+            mag   = props.get('mag')
+            if mag:
+                check_and_send_alerts({'dt': datetime.fromtimestamp(props['time']/1000),
+                                       'mag': mag, 'depth': coords[2],
+                                       'lat': coords[1], 'lon': coords[0],
+                                       'place': props.get('place', 'Unknown')})
 
-        return {
-            "success":  True,
-            "fetched":  len(features),
-            "inserted": inserted,
-            "skipped":  skipped,
-            "message":  f"Fetched {len(features)} events. Inserted {inserted} new, skipped {skipped} duplicates."
-        }
-
+        return {"success": True, "fetched": len(features), "inserted": inserted, "skipped": skipped,
+                "message": f"Fetched {len(features)} events. Inserted {inserted} new, skipped {skipped} duplicates."}
     except requests.RequestException as e:
-        raise HTTPException(status_code=503, detail=f"USGS API error: {str(e)}")
+        raise HTTPException(status_code=503, detail=f"USGS API error: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 # ══════════════════════════════════════════════════════════════════════
 #  ENDPOINTS - AI / ML
@@ -517,8 +540,7 @@ async def predict_magnitude(req: PredictMagnitudeRequest):
     try:
         df    = build_features(req.dict())
         feats = [f for f in ml_models['mag_features'] if f in df.columns]
-        X     = df[feats].fillna(0)
-        X_sc  = ml_models['mag_scaler'].transform(X)
+        X_sc  = ml_models['mag_scaler'].transform(df[feats].fillna(0))
         pred  = float(ml_models['mag_model'].predict(X_sc)[0])
         conf  = min(95, 70 + abs(pred - 4.5) * 5)
         cat   = 'Major' if pred >= 5.5 else 'Moderate' if pred >= 4.0 else 'Minor'
@@ -534,8 +556,7 @@ async def assess_risk(req: RiskAssessmentRequest):
     try:
         df    = build_features(req.dict())
         feats = [f for f in ml_models['cls_features'] if f in df.columns]
-        X     = df[feats].fillna(0)
-        X_sc  = ml_models['cls_scaler'].transform(X)
+        X_sc  = ml_models['cls_scaler'].transform(df[feats].fillna(0))
         prob  = float(ml_models['cls_model'].predict_proba(X_sc)[0][1]) * 100
         level = 'HIGH' if prob > 70 else 'MODERATE' if prob > 30 else 'LOW'
         return {"probability": round(prob, 1), "risk_level": level}
@@ -559,37 +580,28 @@ def get_forecaster():
             print(f"Forecaster init error: {e}")
     return forecaster
 
-
 @app.get("/api/forecast")
 async def get_forecast(days_ahead: int = Query(7, ge=1, le=30)):
     f = get_forecaster()
-    if not f:
-        raise HTTPException(status_code=503, detail="Forecasting unavailable")
+    if not f: raise HTTPException(status_code=503, detail="Forecasting unavailable")
     return {"days_ahead": days_ahead, "forecasts": f.forecast_next_events(days_ahead=days_ahead)}
 
-
 @app.get("/api/forecast/hotspots")
-async def get_hotspots(
-    eps_km:     float = Query(50, ge=10, le=200),
-    min_samples:int   = Query(5,  ge=2,  le=20)
-):
+async def get_hotspots(eps_km: float = Query(50, ge=10, le=200), min_samples: int = Query(5, ge=2, le=20)):
     f = get_forecaster()
-    if not f:
-        raise HTTPException(status_code=503, detail="Forecasting unavailable")
+    if not f: raise HTTPException(status_code=503, detail="Forecasting unavailable")
     result = f.identify_hotspots(eps_km=eps_km, min_samples=min_samples)
     return {"hotspots": result, "count": len(result)}
-
 
 @app.post("/api/forecast/proximity")
 async def check_proximity(req: ProximityRequest):
     f = get_forecaster()
-    if not f:
-        raise HTTPException(status_code=503, detail="Forecasting unavailable")
+    if not f: raise HTTPException(status_code=503, detail="Forecasting unavailable")
     alerts = f.check_proximity_alert(req.lat, req.lon, req.radius_km, req.hours_back)
     return {"alerts": alerts, "count": len(alerts)}
 
 # ══════════════════════════════════════════════════════════════════════
-#  ENDPOINTS - AI CHAT (Groq / LLaMA)
+#  ENDPOINTS - AI CHAT
 # ══════════════════════════════════════════════════════════════════════
 chatbot = None
 
@@ -604,18 +616,14 @@ def get_chatbot():
             print(f"Chatbot init error: {e}")
     return chatbot
 
-
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     bot = get_chatbot()
-    if not bot:
-        raise HTTPException(status_code=503, detail="Chatbot unavailable — check GROQ_API_KEY env var")
-    if not req.message.strip():
-        raise HTTPException(status_code=400, detail="Message required")
+    if not bot: raise HTTPException(status_code=503, detail="Chatbot unavailable — check GROQ_API_KEY")
+    if not req.message.strip(): raise HTTPException(status_code=400, detail="Message required")
     try:
         history = [{"role": m.role, "content": m.content} for m in req.history] if req.history else []
-        reply   = bot.answer_question(req.message, history)
-        return {"response": reply, "timestamp": datetime.now().isoformat()}
+        return {"response": bot.answer_question(req.message, history), "timestamp": datetime.now().isoformat()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -626,20 +634,18 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active_connections.append(ws)
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    def disconnect(self, ws: WebSocket):
+        if ws in self.active_connections:
+            self.active_connections.remove(ws)
 
     async def broadcast(self, message: dict):
         for conn in self.active_connections:
-            try:
-                await conn.send_json(message)
-            except Exception:
-                pass
+            try: await conn.send_json(message)
+            except: pass
 
 manager = ConnectionManager()
 
@@ -653,13 +659,10 @@ async def websocket_live(websocket: WebSocket):
             latest = cursor.fetchone()
             if latest:
                 await websocket.send_json({"type": "latest_event", "data": dict(latest)})
-    except Exception:
-        pass
-
+    except: pass
     try:
         while True:
-            data = await websocket.receive_text()
-            msg  = json.loads(data)
+            msg = json.loads(await websocket.receive_text())
             if msg.get('type') == 'ping':
                 await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
@@ -672,46 +675,34 @@ async def websocket_live(websocket: WebSocket):
 async def subscribe_to_alerts(sub: AlertSubscription):
     try:
         alert_subscriptions[sub.userId] = {
-            'email':         sub.email,
-            'magnitude':     sub.magnitude,
-            'radius':        sub.radius,
-            'lat':           sub.lat,
-            'lon':           sub.lon,
+            'email': sub.email, 'magnitude': sub.magnitude,
+            'radius': sub.radius, 'lat': sub.lat, 'lon': sub.lon,
             'subscribed_at': datetime.now().isoformat()
         }
         return {"success": True, "message": f"Subscribed to M{sub.magnitude}+ alerts within {sub.radius}km"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/api/alerts/unsubscribe")
 async def unsubscribe_from_alerts(unsub: AlertUnsubscribe):
-    try:
-        alert_subscriptions.pop(unsub.userId, None)
-        return {"success": True, "message": "Unsubscribed from alerts"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    alert_subscriptions.pop(unsub.userId, None)
+    return {"success": True, "message": "Unsubscribed from alerts"}
 
 @app.get("/api/alerts/subscribers")
 async def get_subscribers():
     return {"count": len(alert_subscriptions), "subscribers": list(alert_subscriptions.values())}
 
-
 @app.post("/api/alerts/test")
 async def test_alert(email: str):
     try:
         from email_service import send_earthquake_alert
-        test_eq = {
-            'mag':         5.2,
-            'place':       'Test Location, Nepal',
-            'depth':       15,
-            'dt':          datetime.now(),
-            'distance_km': 45
-        }
-        result = send_earthquake_alert(email, test_eq, {'email': email})
-        if result:
-            return {"success": True, "message": f"Test email sent to {email}"}
+        result = send_earthquake_alert(
+            email,
+            {'mag': 5.2, 'place': 'Test Location, Nepal', 'depth': 15,
+             'dt': datetime.now(), 'distance_km': 45},
+            {'email': email}
+        )
+        if result: return {"success": True, "message": f"Test email sent to {email}"}
         raise HTTPException(status_code=500, detail="Email sending failed")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
