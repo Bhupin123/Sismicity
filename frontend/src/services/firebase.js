@@ -94,28 +94,45 @@ const isStrictBrowser = () => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────────
+//  Strip all spaces and non-digit chars except leading +
+//  Fixes phone numbers with spaces like "+977 982 306 5726"
+// ─────────────────────────────────────────────────────────────────
+const cleanPhone = (phone) => {
+  if (!phone) return '';
+  return '+' + phone.replace(/\D/g, '');
+};
+
 // ══════════════════════════════════════════════════════════════════
-//  RECAPTCHA — completely rewritten to fix phone OTP issues
+//  RECAPTCHA — replaces the container DOM node entirely each time
+//  This is the ONLY reliable fix for "already rendered" error
 // ══════════════════════════════════════════════════════════════════
+let rcCounter = 0;
+
 export const setupRecaptcha = (containerId) => {
-  // Always clear any existing verifier first
+  // Destroy existing verifier
   if (window.recaptchaVerifier) {
     try { window.recaptchaVerifier.clear(); } catch (_) {}
     window.recaptchaVerifier = null;
   }
 
-  // Clear the container DOM contents so reCAPTCHA can re-inject
-  const container = document.getElementById(containerId);
-  if (!container) throw new Error(`reCAPTCHA container #${containerId} not found`);
-  container.innerHTML = '';
+  // Find the original container
+  const existing = document.getElementById(containerId);
+  if (!existing) throw new Error(`reCAPTCHA container #${containerId} not found`);
 
-  window.recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
+  // Create a brand-new div with a new unique ID
+  // reCAPTCHA tracks DOM elements internally so we MUST use a fresh element
+  const newId  = `rc-${++rcCounter}`;
+  const newDiv = document.createElement('div');
+  newDiv.id = newId;
+  existing.replaceWith(newDiv);
+
+  window.recaptchaVerifier = new RecaptchaVerifier(auth, newId, {
     size: 'invisible',
     callback: () => {},
-    'expired-callback': () => {
-      window.recaptchaVerifier = null;
-    },
+    'expired-callback': () => { window.recaptchaVerifier = null; },
   });
+
   return window.recaptchaVerifier;
 };
 
@@ -126,10 +143,8 @@ export const registerUser = async (email, password, displayName) => {
   try {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName });
-    // Send verification email — blocks fake emails from being useful
     await sendEmailVerification(cred.user);
     bgSync(cred.user.uid, { ...defaultUserData(cred.user), email, displayName, phone: '' });
-    // Sign out immediately — force them to verify first
     await signOut(auth);
     return { success: true, needsVerification: true };
   } catch (error) {
@@ -140,9 +155,8 @@ export const registerUser = async (email, password, displayName) => {
 export const loginUser = async (email, password) => {
   try {
     const cred = await signInWithEmailAndPassword(auth, email, password);
-    // Block login if email not verified
     if (!cred.user.emailVerified) {
-      await sendEmailVerification(cred.user); // resend in case they lost it
+      await sendEmailVerification(cred.user);
       await signOut(auth);
       return {
         success: false,
@@ -165,7 +179,7 @@ export const resetPassword = async (email) => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  AUTH — GOOGLE (popup for Chrome, redirect for others)
+//  AUTH — GOOGLE
 // ══════════════════════════════════════════════════════════════════
 export const handleGoogleRedirectResult = async () => {
   try {
@@ -203,19 +217,20 @@ export const loginWithGoogle = async () => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  AUTH — PHONE OTP (fixed)
+//  AUTH — PHONE OTP
 // ══════════════════════════════════════════════════════════════════
 export const sendPhoneOTP = async (phoneNumber, containerId) => {
   try {
-    // Fresh verifier every time — fixes "already rendered" errors
+    // Strip spaces from phone number before sending
+    const cleaned = cleanPhone(phoneNumber);
+    console.log('[SeismoIQ] sending OTP to:', cleaned);
+
     const appVerifier = setupRecaptcha(containerId);
-    // render() must complete before signInWithPhoneNumber
     await appVerifier.render();
-    const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+    const confirmationResult = await signInWithPhoneNumber(auth, cleaned, appVerifier);
     window.confirmationResult = confirmationResult;
     return { success: true };
   } catch (error) {
-    // Always clean up on failure so retry works
     if (window.recaptchaVerifier) {
       try { window.recaptchaVerifier.clear(); } catch (_) {}
       window.recaptchaVerifier = null;
@@ -356,7 +371,7 @@ function friendlyError(code) {
     'auth/cancelled-popup-request':   'Another sign-in is in progress.',
     'auth/popup-blocked':             'Popup blocked. Please allow popups for this site.',
     'auth/unauthorized-domain':       'This domain is not authorized in Firebase.',
-    'auth/invalid-phone-number':      'Invalid phone number. Use format: +9771234567890',
+    'auth/invalid-phone-number':      'Invalid phone number. Use format: +9779812345678',
     'auth/invalid-verification-code': 'Invalid OTP code. Please try again.',
     'auth/code-expired':              'OTP expired. Please request a new one.',
     'auth/missing-phone-number':      'Please enter a phone number.',

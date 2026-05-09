@@ -54,19 +54,8 @@ export default function Login() {
   const setNotification = useAppStore((s) => s.setNotification)
   const setUser         = useAuthStore((s) => s.setUser)
 
-  // Pre-render reCAPTCHA as soon as Phone tab is opened
-  // This fixes the timing issue where render() wasn't ready
-  useEffect(() => {
-    if (tab !== 'phone' || otpSent) return
-    const timer = setTimeout(() => {
-      try {
-        const { setupRecaptcha } = require('../services/firebase')
-        const verifier = setupRecaptcha('recaptcha-container')
-        verifier.render().catch(() => {})
-      } catch (_) {}
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [tab, otpSent])
+  // reCAPTCHA is now set up fresh on each sendPhoneOTP call
+  // No pre-render needed — it caused "already rendered" conflicts
 
   const switchTab = (t) => {
     setTab(t); setError(''); setSuccess('')
@@ -126,11 +115,12 @@ export default function Login() {
   // Phone: send OTP
   const handleSendOTP = async (e) => {
     e.preventDefault(); setError(''); setSuccess('')
-    if (!phone || phone.length < 8) {
+    // Strip spaces — PhoneInput adds formatting spaces
+    const cleaned = phone.replace(/\s/g, '')
+    if (!cleaned || cleaned.length < 8) {
       setError('Please enter a valid phone number.'); return
     }
-    // Nepal numbers: +977 followed by 10 digits = 13 chars total
-    if (phone.startsWith('+977') && phone.length !== 14) {
+    if (cleaned.startsWith('+977') && cleaned.replace('+977', '').length !== 10) {
       setError('Nepal numbers must be +977 followed by 10 digits.'); return
     }
     setLoading(true)
