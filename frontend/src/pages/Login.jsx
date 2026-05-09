@@ -8,7 +8,6 @@ import 'react-phone-input-2/lib/style.css'
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://sismicity-1.onrender.com'
 
-// ── Icons ────────────────────────────────────────────────────────────
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -18,7 +17,6 @@ const GoogleIcon = () => (
   </svg>
 )
 
-// ── Shared styles ────────────────────────────────────────────────────
 const inputStyle = {
   width: '100%',
   padding: '12px 14px',
@@ -51,40 +49,34 @@ const primaryBtn = (disabled) => ({
   fontWeight: 700,
   cursor: disabled ? 'not-allowed' : 'pointer',
   boxSizing: 'border-box',
-  transition: 'opacity 0.2s',
 })
 
-// ── Component ────────────────────────────────────────────────────────
 export default function Login() {
-  const [tab, setTab]             = useState('email')
-  const [email, setEmail]         = useState('')
-  const [password, setPassword]   = useState('')
-  const [phone, setPhone]         = useState('')
-  const [otp, setOtp]             = useState('')
-  const [otpSent, setOtpSent]     = useState(false)
-  const [forgotEmail, setForgotEmail]   = useState('')
-  const [forgotSent, setForgotSent]     = useState(false)
-  const [loading, setLoading]           = useState(false)
+  const [tab, setTab]                     = useState('email')
+  const [email, setEmail]                 = useState('')
+  const [password, setPassword]           = useState('')
+  const [phone, setPhone]                 = useState('')
+  const [otp, setOtp]                     = useState('')
+  const [otpSent, setOtpSent]             = useState(false)
+  const [forgotEmail, setForgotEmail]     = useState('')
+  const [forgotSent, setForgotSent]       = useState(false)
+  const [loading, setLoading]             = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const [error, setError]         = useState('')
-  const [success, setSuccess]     = useState('')
+  const [error, setError]                 = useState('')
+  const [success, setSuccess]             = useState('')
 
   const navigate        = useNavigate()
   const setNotification = useAppStore((s) => s.setNotification)
   const setUser         = useAuthStore((s) => s.setUser)
 
   const switchTab = (t) => {
-    setTab(t)
-    setError('')
-    setSuccess('')
-    setOtpSent(false)
-    setForgotSent(false)
+    setTab(t); setError(''); setSuccess('')
+    setOtpSent(false); setForgotSent(false)
   }
 
-  // ── Google ──────────────────────────────────────────────────────
+  // Google sign-in
   const handleGoogle = async () => {
-    setError('')
-    setGoogleLoading(true)
+    setError(''); setGoogleLoading(true)
     const result = await loginWithGoogle()
     if (result.success) {
       setUser(result.user)
@@ -96,11 +88,9 @@ export default function Login() {
     setGoogleLoading(false)
   }
 
-  // ── Email login ─────────────────────────────────────────────────
+  // Email login
   const handleEmailLogin = async (e) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
+    e.preventDefault(); setError(''); setLoading(true)
     const result = await loginUser(email, password)
     if (result.success) {
       setUser(result.user)
@@ -112,15 +102,10 @@ export default function Login() {
     setLoading(false)
   }
 
-  // ── Forgot password — calls YOUR backend → SendGrid ─────────────
+  // Forgot password — calls backend which uses Firebase Admin + SendGrid
   const handleForgotPassword = async (e) => {
-    e.preventDefault()
-    setError('')
-    setSuccess('')
-    if (!forgotEmail.trim()) {
-      setError('Please enter your email address.')
-      return
-    }
+    e.preventDefault(); setError(''); setSuccess('')
+    if (!forgotEmail.trim()) { setError('Please enter your email address.'); return }
     setLoading(true)
     try {
       const res = await fetch(`${API_URL}/api/auth/reset-password`, {
@@ -128,48 +113,33 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotEmail.trim() }),
       })
+      const data = await res.json()
       if (res.ok) {
         setForgotSent(true)
-        setSuccess(`Password reset email sent to ${forgotEmail}.`)
       } else {
-        const data = await res.json()
-        // 404 = email not registered; 500 = server error
         setError(data.detail || 'Failed to send reset email. Please try again.')
       }
     } catch {
-      setError('Network error. Please check your connection and try again.')
+      setError('Network error. Please check your connection.')
     }
     setLoading(false)
   }
 
-  // ── Phone: send OTP ─────────────────────────────────────────────
+  // Phone: send OTP
   const handleSendOTP = async (e) => {
-    e.preventDefault()
-    setError('')
-    setSuccess('')
-    if (!phone || phone.length < 8) {
-      setError('Please enter a valid phone number.')
-      return
-    }
+    e.preventDefault(); setError(''); setSuccess('')
+    if (!phone || phone.length < 8) { setError('Please enter a valid phone number.'); return }
     setLoading(true)
     const result = await sendPhoneOTP(phone.trim(), 'recaptcha-container')
-    if (result.success) {
-      setOtpSent(true)
-      setSuccess('OTP sent! Check your SMS.')
-    } else {
-      setError(result.error)
-    }
+    if (result.success) { setOtpSent(true); setSuccess('OTP sent! Check your SMS.') }
+    else { setError(result.error) }
     setLoading(false)
   }
 
-  // ── Phone: verify OTP ───────────────────────────────────────────
+  // Phone: verify OTP
   const handleVerifyOTP = async (e) => {
-    e.preventDefault()
-    setError('')
-    if (!otp.trim()) {
-      setError('Please enter the OTP.')
-      return
-    }
+    e.preventDefault(); setError('')
+    if (!otp.trim()) { setError('Please enter the OTP.'); return }
     setLoading(true)
     const result = await verifyPhoneOTP(otp.trim())
     if (result.success) {
@@ -182,63 +152,47 @@ export default function Login() {
     setLoading(false)
   }
 
-  // ── Tab style ───────────────────────────────────────────────────
   const tabStyle = (t) => ({
-    flex: 1,
-    padding: '10px 0',
+    flex: 1, padding: '10px 0',
     background: tab === t ? 'rgba(0,200,255,0.15)' : 'transparent',
     border: 'none',
     borderBottom: tab === t ? '2px solid #00c8ff' : '2px solid transparent',
     color: tab === t ? '#00c8ff' : '#5a7a99',
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-    letterSpacing: '0.3px',
+    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    transition: 'all 0.2s', letterSpacing: '0.3px',
   })
 
   return (
     <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
+      minHeight: '100vh', display: 'flex', alignItems: 'center',
       justifyContent: 'center',
       background: 'linear-gradient(135deg, #0a1628 0%, #1e2535 100%)',
       padding: 20,
     }}>
-      {/* Invisible reCAPTCHA — must always be in DOM */}
       <div id="recaptcha-container" />
 
       <div style={{
-        maxWidth: 420,
-        width: '100%',
-        background: '#0d1b2a',
-        borderRadius: 16,
-        padding: 40,
+        maxWidth: 420, width: '100%', background: '#0d1b2a',
+        borderRadius: 16, padding: 40,
         border: '1px solid rgba(0, 200, 255, 0.2)',
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
       }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div style={{ fontSize: 44, marginBottom: 6 }}></div>
           <h1 style={{ color: '#00c8ff', fontSize: 30, margin: 0 }}>SeismoIQ</h1>
           <p style={{ color: '#5a7a99', fontSize: 13, marginTop: 4 }}>Sign in to your account</p>
         </div>
 
-        {/* Google button */}
-        <button
-          onClick={handleGoogle}
-          disabled={googleLoading}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-            width: '100%', padding: '12px',
-            background: googleLoading ? '#ddd' : '#fff',
-            border: 'none', borderRadius: 8,
-            color: '#3c4043', fontSize: 14, fontWeight: 600,
-            cursor: googleLoading ? 'not-allowed' : 'pointer',
-            marginBottom: 20, transition: 'opacity 0.2s',
-          }}
-        >
+        {/* Google */}
+        <button onClick={handleGoogle} disabled={googleLoading} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          width: '100%', padding: '12px',
+          background: googleLoading ? '#ddd' : '#fff',
+          border: 'none', borderRadius: 8,
+          color: '#3c4043', fontSize: 14, fontWeight: 600,
+          cursor: googleLoading ? 'not-allowed' : 'pointer',
+          marginBottom: 20, transition: 'opacity 0.2s',
+        }}>
           <GoogleIcon />
           {googleLoading ? 'Connecting...' : 'Continue with Google'}
         </button>
@@ -253,11 +207,11 @@ export default function Login() {
         {/* Tabs */}
         <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid rgba(0,200,255,0.1)' }}>
           <button style={tabStyle('email')}  onClick={() => switchTab('email')}>Email</button>
-          <button style={tabStyle('phone')}  onClick={() => switchTab('phone')}>📱 Phone</button>
+          <button style={tabStyle('phone')}  onClick={() => switchTab('phone')}>Phone</button>
           <button style={tabStyle('forgot')} onClick={() => switchTab('forgot')}>Forgot?</button>
         </div>
 
-        {/* ── Error banner — only one shown at a time ── */}
+        {/* Error — only shown when no success */}
         {error && !success && (
           <div style={{
             background: 'rgba(255,61,61,0.1)', border: '1px solid rgba(255,61,61,0.3)',
@@ -267,7 +221,7 @@ export default function Login() {
           </div>
         )}
 
-        {/* ── Success banner ── */}
+        {/* Success — only shown when no error */}
         {success && !error && (
           <div style={{
             background: 'rgba(0,200,100,0.1)', border: '1px solid rgba(0,200,100,0.3)',
@@ -277,24 +231,18 @@ export default function Login() {
           </div>
         )}
 
-        {/* ══ EMAIL TAB ══ */}
+        {/* EMAIL TAB */}
         {tab === 'email' && (
           <form onSubmit={handleEmailLogin}>
             <div style={{ marginBottom: 16 }}>
               <label style={labelStyle}>EMAIL</label>
-              <input
-                type="email" value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required placeholder="you@example.com" style={inputStyle}
-              />
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                required placeholder="you@example.com" style={inputStyle} />
             </div>
             <div style={{ marginBottom: 8 }}>
               <label style={labelStyle}>PASSWORD</label>
-              <input
-                type="password" value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required placeholder="••••••••" style={inputStyle}
-              />
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                required placeholder="........" style={inputStyle} />
             </div>
             <div style={{ textAlign: 'right', marginBottom: 20 }}>
               <button type="button" onClick={() => switchTab('forgot')}
@@ -308,7 +256,7 @@ export default function Login() {
           </form>
         )}
 
-        {/* ══ PHONE TAB ══ */}
+        {/* PHONE TAB */}
         {tab === 'phone' && (
           <>
             {!otpSent ? (
@@ -330,8 +278,7 @@ export default function Login() {
                     buttonStyle={{
                       background: '#0a1628',
                       border: '1px solid rgba(0,200,255,0.2)',
-                      borderRadius: '8px 0 0 8px',
-                      borderRight: 'none',
+                      borderRadius: '8px 0 0 8px', borderRight: 'none',
                     }}
                     dropdownStyle={{
                       background: '#0d1b2a', color: '#e0e0e0',
@@ -351,53 +298,45 @@ export default function Login() {
             ) : (
               <form onSubmit={handleVerifyOTP}>
                 <p style={{ color: '#5a7a99', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
-                  Enter the 6-digit code sent to{' '}
-                  <strong style={{ color: '#e0e0e0' }}>{phone}</strong>
+                  Enter the 6-digit code sent to <strong style={{ color: '#e0e0e0' }}>{phone}</strong>
                 </p>
                 <div style={{ marginBottom: 20 }}>
                   <label style={labelStyle}>OTP CODE</label>
-                  <input
-                    type="text" value={otp} maxLength={6}
+                  <input type="text" value={otp} maxLength={6}
                     onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
                     required placeholder="123456"
-                    style={{ ...inputStyle, letterSpacing: 8, fontSize: 20, textAlign: 'center' }}
-                  />
+                    style={{ ...inputStyle, letterSpacing: 8, fontSize: 20, textAlign: 'center' }} />
                 </div>
                 <button type="submit" disabled={loading} style={primaryBtn(loading)}>
                   {loading ? 'Verifying...' : 'Verify OTP'}
                 </button>
-                <button
-                  type="button"
+                <button type="button"
                   onClick={() => { setOtpSent(false); setOtp(''); setSuccess(''); setError('') }}
                   style={{
-                    width: '100%', marginTop: 10, padding: '10px',
-                    background: 'transparent',
-                    border: '1px solid rgba(0,200,255,0.2)',
-                    borderRadius: 8, color: '#5a7a99', fontSize: 13, cursor: 'pointer',
-                  }}
-                >
-                  ← Change number / Resend
+                    width: '100%', marginTop: 10, padding: '10px', background: 'transparent',
+                    border: '1px solid rgba(0,200,255,0.2)', borderRadius: 8,
+                    color: '#5a7a99', fontSize: 13, cursor: 'pointer',
+                  }}>
+                  Change number / Resend
                 </button>
               </form>
             )}
           </>
         )}
 
-        {/* ══ FORGOT PASSWORD TAB ══ */}
+        {/* FORGOT PASSWORD TAB */}
         {tab === 'forgot' && (
           <>
             {!forgotSent ? (
               <form onSubmit={handleForgotPassword}>
                 <p style={{ color: '#5a7a99', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
-                  Enter your email and we'll send you a link to reset your password.
+                  Enter your email and we will send you a link to reset your password.
                 </p>
                 <div style={{ marginBottom: 20 }}>
                   <label style={labelStyle}>EMAIL</label>
-                  <input
-                    type="email" value={forgotEmail}
+                  <input type="email" value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
-                    required placeholder="you@example.com" style={inputStyle}
-                  />
+                    required placeholder="you@example.com" style={inputStyle} />
                 </div>
                 <button type="submit" disabled={loading} style={primaryBtn(loading)}>
                   {loading ? 'Sending...' : 'Send Reset Email'}
@@ -405,18 +344,15 @@ export default function Login() {
               </form>
             ) : (
               <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                <div style={{ fontSize: 48, marginBottom: 12 }}></div>
                 <p style={{ color: '#00c864', fontSize: 14, marginBottom: 8 }}>
                   Reset link sent to <strong>{forgotEmail}</strong>
                 </p>
                 <p style={{ color: '#5a7a99', fontSize: 12, marginBottom: 20 }}>
                   Check your inbox. The link expires in 1 hour.
                 </p>
-                <button
-                  onClick={() => switchTab('email')}
-                  style={{ background: 'none', border: 'none', color: '#00c8ff', fontSize: 13, cursor: 'pointer' }}
-                >
-                  ← Back to Sign In
+                <button onClick={() => switchTab('email')}
+                  style={{ background: 'none', border: 'none', color: '#00c8ff', fontSize: 13, cursor: 'pointer' }}>
+                  Back to Sign In
                 </button>
               </div>
             )}
