@@ -95,8 +95,7 @@ const isStrictBrowser = () => {
 };
 
 // ─────────────────────────────────────────────────────────────────
-//  Strip all spaces and non-digit chars except leading +
-//  Fixes phone numbers with spaces like "+977 982 306 5726"
+//  Strip spaces from phone number before sending to Firebase
 // ─────────────────────────────────────────────────────────────────
 const cleanPhone = (phone) => {
   if (!phone) return '';
@@ -104,24 +103,20 @@ const cleanPhone = (phone) => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  RECAPTCHA — replaces the container DOM node entirely each time
-//  This is the ONLY reliable fix for "already rendered" error
+//  RECAPTCHA — replaces DOM node entirely to avoid "already rendered"
 // ══════════════════════════════════════════════════════════════════
 let rcCounter = 0;
 
 export const setupRecaptcha = (containerId) => {
-  // Destroy existing verifier
   if (window.recaptchaVerifier) {
     try { window.recaptchaVerifier.clear(); } catch (_) {}
     window.recaptchaVerifier = null;
   }
 
-  // Find the original container
   const existing = document.getElementById(containerId);
   if (!existing) throw new Error(`reCAPTCHA container #${containerId} not found`);
 
-  // Create a brand-new div with a new unique ID
-  // reCAPTCHA tracks DOM elements internally so we MUST use a fresh element
+  // Replace with a brand-new element — reCAPTCHA tracks DOM nodes internally
   const newId  = `rc-${++rcCounter}`;
   const newDiv = document.createElement('div');
   newDiv.id = newId;
@@ -179,7 +174,7 @@ export const resetPassword = async (email) => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-//  AUTH — GOOGLE
+//  AUTH — GOOGLE (popup for Chrome, redirect for Firefox/Safari/Brave)
 // ══════════════════════════════════════════════════════════════════
 export const handleGoogleRedirectResult = async () => {
   try {
@@ -218,10 +213,11 @@ export const loginWithGoogle = async () => {
 
 // ══════════════════════════════════════════════════════════════════
 //  AUTH — PHONE OTP
+//  Requires Firebase Blaze plan for real SMS
+//  Test numbers added in Firebase Console work on free plan
 // ══════════════════════════════════════════════════════════════════
 export const sendPhoneOTP = async (phoneNumber, containerId) => {
   try {
-    // Strip spaces from phone number before sending
     const cleaned = cleanPhone(phoneNumber);
     console.log('[SeismoIQ] sending OTP to:', cleaned);
 
@@ -303,9 +299,10 @@ export const subscribeToAlerts = async (userId, alertSettings) => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userId, email: user.email, displayName: user.displayName || '',
-        magnitude: alertSettings.magnitude, selectedMagnitudes: alertSettings.selectedMagnitudes,
-        radius: alertSettings.radius, lat: alertSettings.lat, lon: alertSettings.lon,
-        locationName: alertSettings.locationName,
+        magnitude: alertSettings.magnitude,
+        selectedMagnitudes: alertSettings.selectedMagnitudes,
+        radius: alertSettings.radius, lat: alertSettings.lat,
+        lon: alertSettings.lon, locationName: alertSettings.locationName,
       }),
       signal: ctrl.signal,
     })
@@ -376,6 +373,7 @@ function friendlyError(code) {
     'auth/code-expired':              'OTP expired. Please request a new one.',
     'auth/missing-phone-number':      'Please enter a phone number.',
     'auth/quota-exceeded':            'SMS quota exceeded. Try again later.',
+    'auth/billing-not-enabled':       'Phone sign-in is currently unavailable. Please use email or Google to sign in.',
     'auth/captcha-check-failed':      'reCAPTCHA failed. Please refresh and try again.',
     'auth/missing-verification-code': 'Please enter the OTP code.',
   };
