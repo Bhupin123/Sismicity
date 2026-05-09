@@ -1,11 +1,14 @@
 import React, { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { loginUser, loginWithGoogle, sendPhoneOTP, verifyPhoneOTP, resetPassword } from '../services/firebase'
+import { loginUser, loginWithGoogle, sendPhoneOTP, verifyPhoneOTP } from '../services/firebase'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import PhoneInput from 'react-phone-input-2'
 import 'react-phone-input-2/lib/style.css'
 
+const API_URL = import.meta.env.VITE_API_URL || 'https://sismicity-1.onrender.com'
+
+// ── Icons ────────────────────────────────────────────────────────────
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 48 48" style={{ flexShrink: 0 }}>
     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -15,12 +18,7 @@ const GoogleIcon = () => (
   </svg>
 )
 
-const PhoneIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}>
-    <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z" />
-  </svg>
-)
-
+// ── Shared styles ────────────────────────────────────────────────────
 const inputStyle = {
   width: '100%',
   padding: '12px 14px',
@@ -30,7 +28,7 @@ const inputStyle = {
   color: '#e0e0e0',
   fontSize: 14,
   outline: 'none',
-  boxSizing: 'border-box'
+  boxSizing: 'border-box',
 }
 
 const labelStyle = {
@@ -39,26 +37,41 @@ const labelStyle = {
   fontSize: 12,
   marginBottom: 6,
   fontWeight: 600,
-  letterSpacing: '0.5px'
+  letterSpacing: '0.5px',
 }
 
-// Tabs: 'email' | 'phone' | 'forgot'
+const primaryBtn = (disabled) => ({
+  width: '100%',
+  padding: '14px',
+  background: disabled ? '#555' : 'linear-gradient(135deg, #00c8ff, #0099cc)',
+  border: 'none',
+  borderRadius: 8,
+  color: '#fff',
+  fontSize: 15,
+  fontWeight: 700,
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  boxSizing: 'border-box',
+  transition: 'opacity 0.2s',
+})
+
+// ── Component ────────────────────────────────────────────────────────
 export default function Login() {
-  const [tab, setTab] = useState('email')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [phone, setPhone] = useState('')
-  const [otp, setOtp] = useState('')
-  const [otpSent, setOtpSent] = useState(false)
-  const [forgotEmail, setForgotEmail] = useState('')
-  const [forgotSent, setForgotSent] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [tab, setTab]             = useState('email')
+  const [email, setEmail]         = useState('')
+  const [password, setPassword]   = useState('')
+  const [phone, setPhone]         = useState('')
+  const [otp, setOtp]             = useState('')
+  const [otpSent, setOtpSent]     = useState(false)
+  const [forgotEmail, setForgotEmail]   = useState('')
+  const [forgotSent, setForgotSent]     = useState(false)
+  const [loading, setLoading]           = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
-  const navigate = useNavigate()
+  const [error, setError]         = useState('')
+  const [success, setSuccess]     = useState('')
+
+  const navigate        = useNavigate()
   const setNotification = useAppStore((s) => s.setNotification)
-  const setUser = useAuthStore((s) => s.setUser)
+  const setUser         = useAuthStore((s) => s.setUser)
 
   const switchTab = (t) => {
     setTab(t)
@@ -99,7 +112,7 @@ export default function Login() {
     setLoading(false)
   }
 
-  // ── Forgot password ─────────────────────────────────────────────
+  // ── Forgot password — calls YOUR backend → SendGrid ─────────────
   const handleForgotPassword = async (e) => {
     e.preventDefault()
     setError('')
@@ -109,12 +122,22 @@ export default function Login() {
       return
     }
     setLoading(true)
-    const result = await resetPassword(forgotEmail.trim())
-    if (result.success) {
-      setForgotSent(true)
-      setSuccess(`Password reset email sent to ${forgotEmail}. Check your inbox (and spam folder).`)
-    } else {
-      setError(result.error)
+    try {
+      const res = await fetch(`${API_URL}/api/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      })
+      if (res.ok) {
+        setForgotSent(true)
+        setSuccess(`Password reset email sent to ${forgotEmail}.`)
+      } else {
+        const data = await res.json()
+        // 404 = email not registered; 500 = server error
+        setError(data.detail || 'Failed to send reset email. Please try again.')
+      }
+    } catch {
+      setError('Network error. Please check your connection and try again.')
     }
     setLoading(false)
   }
@@ -123,8 +146,9 @@ export default function Login() {
   const handleSendOTP = async (e) => {
     e.preventDefault()
     setError('')
-    if (!phone.trim()) {
-      setError('Please enter a phone number.')
+    setSuccess('')
+    if (!phone || phone.length < 8) {
+      setError('Please enter a valid phone number.')
       return
     }
     setLoading(true)
@@ -150,7 +174,7 @@ export default function Login() {
     const result = await verifyPhoneOTP(otp.trim())
     if (result.success) {
       setUser(result.user)
-      setNotification(`Welcome!`)
+      setNotification('Welcome!')
       navigate('/')
     } else {
       setError(result.error)
@@ -158,7 +182,7 @@ export default function Login() {
     setLoading(false)
   }
 
-  // ── Tab button style ────────────────────────────────────────────
+  // ── Tab style ───────────────────────────────────────────────────
   const tabStyle = (t) => ({
     flex: 1,
     padding: '10px 0',
@@ -170,7 +194,7 @@ export default function Login() {
     fontWeight: 600,
     cursor: 'pointer',
     transition: 'all 0.2s',
-    letterSpacing: '0.3px'
+    letterSpacing: '0.3px',
   })
 
   return (
@@ -180,9 +204,9 @@ export default function Login() {
       alignItems: 'center',
       justifyContent: 'center',
       background: 'linear-gradient(135deg, #0a1628 0%, #1e2535 100%)',
-      padding: 20
+      padding: 20,
     }}>
-      {/* Invisible recaptcha container — must always be in DOM */}
+      {/* Invisible reCAPTCHA — must always be in DOM */}
       <div id="recaptcha-container" />
 
       <div style={{
@@ -192,7 +216,7 @@ export default function Login() {
         borderRadius: 16,
         padding: 40,
         border: '1px solid rgba(0, 200, 255, 0.2)',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
       }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
@@ -201,7 +225,7 @@ export default function Login() {
           <p style={{ color: '#5a7a99', fontSize: 13, marginTop: 4 }}>Sign in to your account</p>
         </div>
 
-        {/* Google button — always visible */}
+        {/* Google button */}
         <button
           onClick={handleGoogle}
           disabled={googleLoading}
@@ -212,7 +236,7 @@ export default function Login() {
             border: 'none', borderRadius: 8,
             color: '#3c4043', fontSize: 14, fontWeight: 600,
             cursor: googleLoading ? 'not-allowed' : 'pointer',
-            marginBottom: 20, transition: 'opacity 0.2s'
+            marginBottom: 20, transition: 'opacity 0.2s',
           }}
         >
           <GoogleIcon />
@@ -228,30 +252,32 @@ export default function Login() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', marginBottom: 24, borderBottom: '1px solid rgba(0,200,255,0.1)' }}>
-          <button style={tabStyle('email')} onClick={() => switchTab('email')}>Email</button>
-          <button style={tabStyle('phone')} onClick={() => switchTab('phone')}> Phone</button>
+          <button style={tabStyle('email')}  onClick={() => switchTab('email')}>Email</button>
+          <button style={tabStyle('phone')}  onClick={() => switchTab('phone')}>📱 Phone</button>
           <button style={tabStyle('forgot')} onClick={() => switchTab('forgot')}>Forgot?</button>
         </div>
 
-        {/* Error / Success */}
-        {error && (
+        {/* ── Error banner — only one shown at a time ── */}
+        {error && !success && (
           <div style={{
             background: 'rgba(255,61,61,0.1)', border: '1px solid rgba(255,61,61,0.3)',
-            borderRadius: 8, padding: 12, marginBottom: 16, color: '#ff3d3d', fontSize: 13
+            borderRadius: 8, padding: 12, marginBottom: 16, color: '#ff3d3d', fontSize: 13,
           }}>
             {error}
           </div>
         )}
-        {success && (
+
+        {/* ── Success banner ── */}
+        {success && !error && (
           <div style={{
             background: 'rgba(0,200,100,0.1)', border: '1px solid rgba(0,200,100,0.3)',
-            borderRadius: 8, padding: 12, marginBottom: 16, color: '#00c864', fontSize: 13
+            borderRadius: 8, padding: 12, marginBottom: 16, color: '#00c864', fontSize: 13,
           }}>
             {success}
           </div>
         )}
 
-        {/* ── EMAIL TAB ── */}
+        {/* ══ EMAIL TAB ══ */}
         {tab === 'email' && (
           <form onSubmit={handleEmailLogin}>
             <div style={{ marginBottom: 16 }}>
@@ -276,70 +302,48 @@ export default function Login() {
                 Forgot password?
               </button>
             </div>
-            <button type="submit" disabled={loading} style={{
-              width: '100%', padding: '14px',
-              background: loading ? '#555' : 'linear-gradient(135deg, #00c8ff, #0099cc)',
-              border: 'none', borderRadius: 8, color: '#fff',
-              fontSize: 15, fontWeight: 700,
-              cursor: loading ? 'not-allowed' : 'pointer', boxSizing: 'border-box'
-            }}>
+            <button type="submit" disabled={loading} style={primaryBtn(loading)}>
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
         )}
 
-        {/* ── PHONE TAB ── */}
+        {/* ══ PHONE TAB ══ */}
         {tab === 'phone' && (
           <>
             {!otpSent ? (
               <form onSubmit={handleSendOTP}>
                 <div style={{ marginBottom: 8 }}>
                   <label style={labelStyle}>PHONE NUMBER</label>
-
                   <PhoneInput
                     country={'np'}
                     value={phone}
                     onChange={(value) => setPhone('+' + value)}
-
                     containerStyle={{ width: '100%' }}
-
                     inputStyle={{
-                      width: '100%',
-                      height: '44px',
-                      background: 'var(--raised)',
-                      border: '1px solid var(--bdr2)',
-                      borderRadius: 'var(--radius)',
-                      color: 'var(--txt)',
-                      fontSize: '14px',
-                      paddingLeft: '48px'
+                      width: '100%', height: '44px',
+                      background: '#0a1628',
+                      border: '1px solid rgba(0,200,255,0.2)',
+                      borderRadius: 8, color: '#e0e0e0',
+                      fontSize: '14px', paddingLeft: '48px',
                     }}
-
                     buttonStyle={{
-                      background: 'var(--raised)',
-                      border: '1px solid var(--bdr2)',
-                      borderRadius: 'var(--radius)',
-                      borderRight: 'none'
+                      background: '#0a1628',
+                      border: '1px solid rgba(0,200,255,0.2)',
+                      borderRadius: '8px 0 0 8px',
+                      borderRight: 'none',
                     }}
-
                     dropdownStyle={{
-                      background: 'var(--panel)',
-                      color: 'var(--txt)',
-                      border: '1px solid var(--border)'
+                      background: '#0d1b2a', color: '#e0e0e0',
+                      border: '1px solid rgba(0,200,255,0.2)',
                     }}
                   />
-
                   <p style={{ color: '#5a7a99', fontSize: 11, marginTop: 6 }}>
-                    Include country code automatically
+                    Country code is added automatically
                   </p>
                 </div>
                 <div style={{ marginTop: 20 }}>
-                  <button type="submit" disabled={loading} style={{
-                    width: '100%', padding: '14px',
-                    background: loading ? '#555' : 'linear-gradient(135deg, #00c8ff, #0099cc)',
-                    border: 'none', borderRadius: 8, color: '#fff',
-                    fontSize: 15, fontWeight: 700,
-                    cursor: loading ? 'not-allowed' : 'pointer', boxSizing: 'border-box'
-                  }}>
+                  <button type="submit" disabled={loading} style={primaryBtn(loading)}>
                     {loading ? 'Sending OTP...' : 'Send OTP'}
                   </button>
                 </div>
@@ -347,7 +351,8 @@ export default function Login() {
             ) : (
               <form onSubmit={handleVerifyOTP}>
                 <p style={{ color: '#5a7a99', fontSize: 13, marginTop: 0, marginBottom: 16 }}>
-                  Enter the 6-digit code sent to <strong style={{ color: '#e0e0e0' }}>{phone}</strong>
+                  Enter the 6-digit code sent to{' '}
+                  <strong style={{ color: '#e0e0e0' }}>{phone}</strong>
                 </p>
                 <div style={{ marginBottom: 20 }}>
                   <label style={labelStyle}>OTP CODE</label>
@@ -358,21 +363,19 @@ export default function Login() {
                     style={{ ...inputStyle, letterSpacing: 8, fontSize: 20, textAlign: 'center' }}
                   />
                 </div>
-                <button type="submit" disabled={loading} style={{
-                  width: '100%', padding: '14px',
-                  background: loading ? '#555' : 'linear-gradient(135deg, #00c8ff, #0099cc)',
-                  border: 'none', borderRadius: 8, color: '#fff',
-                  fontSize: 15, fontWeight: 700,
-                  cursor: loading ? 'not-allowed' : 'pointer', boxSizing: 'border-box'
-                }}>
+                <button type="submit" disabled={loading} style={primaryBtn(loading)}>
                   {loading ? 'Verifying...' : 'Verify OTP'}
                 </button>
-                <button type="button" onClick={() => { setOtpSent(false); setOtp(''); setSuccess(''); setError('') }}
+                <button
+                  type="button"
+                  onClick={() => { setOtpSent(false); setOtp(''); setSuccess(''); setError('') }}
                   style={{
-                    width: '100%', marginTop: 10, padding: '10px', background: 'transparent',
-                    border: '1px solid rgba(0,200,255,0.2)', borderRadius: 8, color: '#5a7a99',
-                    fontSize: 13, cursor: 'pointer'
-                  }}>
+                    width: '100%', marginTop: 10, padding: '10px',
+                    background: 'transparent',
+                    border: '1px solid rgba(0,200,255,0.2)',
+                    borderRadius: 8, color: '#5a7a99', fontSize: 13, cursor: 'pointer',
+                  }}
+                >
                   ← Change number / Resend
                 </button>
               </form>
@@ -380,7 +383,7 @@ export default function Login() {
           </>
         )}
 
-        {/* ── FORGOT PASSWORD TAB ── */}
+        {/* ══ FORGOT PASSWORD TAB ══ */}
         {tab === 'forgot' && (
           <>
             {!forgotSent ? (
@@ -396,24 +399,23 @@ export default function Login() {
                     required placeholder="you@example.com" style={inputStyle}
                   />
                 </div>
-                <button type="submit" disabled={loading} style={{
-                  width: '100%', padding: '14px',
-                  background: loading ? '#555' : 'linear-gradient(135deg, #00c8ff, #0099cc)',
-                  border: 'none', borderRadius: 8, color: '#fff',
-                  fontSize: 15, fontWeight: 700,
-                  cursor: loading ? 'not-allowed' : 'pointer', boxSizing: 'border-box'
-                }}>
+                <button type="submit" disabled={loading} style={primaryBtn(loading)}>
                   {loading ? 'Sending...' : 'Send Reset Email'}
                 </button>
               </form>
             ) : (
               <div style={{ textAlign: 'center', padding: '20px 0' }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}></div>
-                <p style={{ color: '#00c864', fontSize: 14, marginBottom: 16 }}>
-                  Reset link sent! Check your inbox and spam folder.
+                <p style={{ color: '#00c864', fontSize: 14, marginBottom: 8 }}>
+                  Reset link sent to <strong>{forgotEmail}</strong>
                 </p>
-                <button onClick={() => switchTab('email')}
-                  style={{ background: 'none', border: 'none', color: '#00c8ff', fontSize: 13, cursor: 'pointer' }}>
+                <p style={{ color: '#5a7a99', fontSize: 12, marginBottom: 20 }}>
+                  Check your inbox. The link expires in 1 hour.
+                </p>
+                <button
+                  onClick={() => switchTab('email')}
+                  style={{ background: 'none', border: 'none', color: '#00c8ff', fontSize: 13, cursor: 'pointer' }}
+                >
                   ← Back to Sign In
                 </button>
               </div>
