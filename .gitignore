@@ -1,6 +1,0 @@
-﻿.env
-backend/.env
-frontend/.env.production
-seismoiq-app-firebase-adminsdk-fbsvc-f290c1452a.json
-ml/usgs_training_data.csv
-kaggle.json
