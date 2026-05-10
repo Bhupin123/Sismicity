@@ -141,7 +141,7 @@ export default function Predictions() {
           {/* Location preset selector */}
           <div style={{ marginBottom: 20 }}>
             <div style={{ color: 'var(--txt2)', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-              📍 Location
+              Location
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {LOCATIONS.map(loc => (
@@ -157,7 +157,7 @@ export default function Predictions() {
                     color: location.name === loc.name ? 'var(--accent)' : 'var(--txt2)',
                     transition: 'all 0.15s',
                   }}>
-                  {loc.name === 'Custom' ? '✏️ Custom' : loc.name.split(',')[0]}
+                  {loc.name === 'Custom' ? 'Custom' : loc.name.split(',')[0]}
                 </button>
               ))}
             </div>
@@ -185,27 +185,27 @@ export default function Predictions() {
 
           {/* Sliders */}
           <SliderField
-            label="Depth" icon="⬇️" hint="How deep underground"
+            label="Depth" icon="" hint="How deep underground"
             value={form.depth} min={0} max={300} step={1} unit=" km"
             onChange={v => set('depth', v)}
           />
           <SliderField
-            label="Recent Activity (7 days)" icon="📊" hint="Earthquakes in last week"
+            label="Recent Activity (7 days)" icon="" hint="Earthquakes in last week"
             value={form.rolling_count_7d} min={0} max={100} step={1} unit=" events"
             onChange={v => set('rolling_count_7d', v)}
           />
           <SliderField
-            label="Recent Activity (30 days)" icon="📈" hint="Earthquakes in last month"
+            label="Recent Activity (30 days)" icon="" hint="Earthquakes in last month"
             value={form.rolling_count_30d} min={0} max={300} step={1} unit=" events"
             onChange={v => set('rolling_count_30d', v)}
           />
           <SliderField
-            label="Average Magnitude (30 days)" icon="〰️" hint="Avg strength of recent quakes"
+            label="Average Magnitude (30 days)" icon="" hint="Avg strength of recent quakes"
             value={form.rolling_mean_mag_30d} min={1} max={8} step={0.1}
             onChange={v => set('rolling_mean_mag_30d', v)}
           />
           <SliderField
-            label="Days Since Last Major Quake" icon="⏱️" hint="Days since last M5.5+ event"
+            label="Days Since Last Major Quake" icon="" hint="Days since last M5.5+ event"
             value={form.days_since_last_major} min={0} max={365} step={1} unit=" days"
             onChange={v => set('days_since_last_major', v)}
           />
@@ -216,7 +216,7 @@ export default function Predictions() {
               padding: '6px 10px', background: 'rgba(0,200,100,0.08)',
               borderRadius: 6, border: '1px solid rgba(0,200,100,0.2)',
             }}>
-              ✓ Activity data auto-filled from your live database
+              Activity data auto-filled from your live database
             </div>
           )}
 
@@ -251,7 +251,7 @@ export default function Predictions() {
           {!loading && !result && (
             <div className="empty-state">
               <div style={{ fontSize: 56, marginBottom: 12 }}>
-                {tab === 'magnitude' ? '🌍' : '⚡'}
+                {tab === 'magnitude' ? '' : ''}
               </div>
               <p style={{ color: 'var(--txt2)', fontSize: 14, marginBottom: 8 }}>
                 {tab === 'magnitude'
