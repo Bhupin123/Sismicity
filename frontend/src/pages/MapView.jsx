@@ -346,16 +346,35 @@ export default function MapView() {
       if (magOpt.max)   params.max_mag   = magOpt.max
       if (majorOnly)    params.is_major  = true
 
-      const [evtRes, locRes, statRes] = await Promise.all([
+      // Fetch events and stats in parallel, locations separately after
+      const [evtRes, statRes] = await Promise.all([
         earthquakeService.getAll(params),
-        earthquakeService.getByLocation({ limit: 20 }),
         earthquakeService.getStats(timeOpt.days ? { days_back: timeOpt.days } : {}),
       ])
       setAllEvents(evtRes?.results || [])
-      setLocations(locRes || [])
       setStats(statRes)
       setLastUpdate(new Date())
       setPage(1)
+
+      // Build top locations from the actual filtered events (not a separate DB call)
+      // This ensures charts match the current filter
+      const results = evtRes?.results || []
+      const placeCounts = {}
+      results.forEach(e => {
+        if (!e.place) return
+        // Extract short location name (before first comma or "of")
+        const short = e.place.split(',').pop()?.trim() || e.place
+        if (!placeCounts[short]) placeCounts[short] = { place: short, count: 0, max_mag: 0, avg_mag: 0, total: 0 }
+        placeCounts[short].count++
+        placeCounts[short].max_mag = Math.max(placeCounts[short].max_mag, e.mag)
+        placeCounts[short].total += e.mag
+        placeCounts[short].avg_mag = placeCounts[short].total / placeCounts[short].count
+      })
+      const topLocs = Object.values(placeCounts)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 15)
+      setLocations(topLocs)
+
     } catch (e) {
       console.error('Fetch error:', e)
     } finally {
