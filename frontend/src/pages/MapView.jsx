@@ -17,11 +17,11 @@ function useMapHeight() {
 
 // ── Map tile layers ───────────────────────────────────────────────
 const MAP_STYLES = [
-  { id: 'dark',      label: 'Dark',      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',                                                     attr: '&copy; OpenStreetMap &copy; CARTO', sub: 'abcd' },
-  { id: 'satellite', label: 'Satellite', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',                     attr: '&copy; Esri',                       sub: null   },
-  { id: 'terrain',   label: 'Terrain',   url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                                                                  attr: '&copy; OpenTopoMap',                sub: 'abc'  },
-  { id: 'street',    label: 'Street',    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',                                          attr: '&copy; OpenStreetMap &copy; CARTO', sub: 'abcd' },
-  { id: 'night',     label: 'Night',     url: 'https://map1.vis.earthdata.nasa.gov/wmts-webmerc/VIIRS_CityLights_2012/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg', attr: '&copy; NASA',                      sub: null   },
+  { id: 'dark',      label: 'Dark',      url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',                                                      attr: '&copy; OpenStreetMap &copy; CARTO', sub: 'abcd' },
+  { id: 'satellite', label: 'Satellite', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',                      attr: '&copy; Esri',                       sub: null   },
+  { id: 'terrain',   label: 'Terrain',   url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',                                                                   attr: '&copy; OpenTopoMap',                sub: 'abc'  },
+  { id: 'street',    label: 'Street',    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',                                           attr: '&copy; OpenStreetMap &copy; CARTO', sub: 'abcd' },
+  { id: 'night',     label: 'Night',     url: 'https://map1.vis.earthdata.nasa.gov/wmts-webmerc/VIIRS_CityLights_2012/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg', attr: '&copy; NASA',                       sub: null   },
 ]
 
 // ── Magnitude config ──────────────────────────────────────────────
@@ -40,12 +40,200 @@ function getCoords(eq) {
   return [null, null]
 }
 
-// ── Extract country from USGS place string ────────────────────────
-// USGS format: "10km NE of City, Country" — country is always last segment
+// ── Accurate country extraction ───────────────────────────────────
+// Maps USGS sub-region names → canonical country names
+const REGION_MAP = {
+  // China provinces & autonomous regions
+  xinjiang: 'China', xizang: 'China', tibet: 'China', qinghai: 'China',
+  sichuan: 'China', yunnan: 'China', gansu: 'China', shaanxi: 'China',
+  shanxi: 'China', hebei: 'China', liaoning: 'China', jilin: 'China',
+  heilongjiang: 'China', 'inner mongolia': 'China', ningxia: 'China',
+  guizhou: 'China', guangxi: 'China', fujian: 'China', hunan: 'China',
+  hubei: 'China', henan: 'China', anhui: 'China', jiangxi: 'China',
+  zhejiang: 'China', jiangsu: 'China', shandong: 'China',
+
+  // Japan regions
+  honshu: 'Japan', kyushu: 'Japan', hokkaido: 'Japan', shikoku: 'Japan',
+  'ryukyu islands': 'Japan', 'bonin islands': 'Japan',
+
+  // Indonesia regions
+  sumatra: 'Indonesia', java: 'Indonesia', sulawesi: 'Indonesia',
+  'irian jaya': 'Indonesia', 'flores region': 'Indonesia',
+  'banda sea': 'Indonesia', 'molucca sea': 'Indonesia',
+  seram: 'Indonesia', halmahera: 'Indonesia', papua: 'Indonesia',
+  kalimantan: 'Indonesia', lombok: 'Indonesia', 'timor region': 'Indonesia',
+  nias: 'Indonesia', bali: 'Indonesia', 'kepulauan barat daya': 'Indonesia',
+  'kepulauan sula': 'Indonesia', 'ceram sea': 'Indonesia',
+
+  // Philippines
+  mindanao: 'Philippines', luzon: 'Philippines', visayas: 'Philippines',
+  'philippine islands': 'Philippines', samar: 'Philippines',
+  leyte: 'Philippines', negros: 'Philippines',
+
+  // Russia regions
+  kamchatka: 'Russia', sakhalin: 'Russia', 'kuril islands': 'Russia',
+  siberia: 'Russia', yakutia: 'Russia', 'near islands': 'Russia',
+  'fox islands': 'United States',
+
+  // US states
+  alaska: 'United States', hawaii: 'United States', california: 'United States',
+  nevada: 'United States', oregon: 'United States', washington: 'United States',
+  montana: 'United States', idaho: 'United States', wyoming: 'United States',
+  utah: 'United States', colorado: 'United States', arizona: 'United States',
+  'new mexico': 'United States', texas: 'United States', oklahoma: 'United States',
+  'puerto rico': 'United States', guam: 'United States',
+  'u.s. virgin islands': 'United States',
+
+  // Pacific nations
+  'kermadec islands': 'New Zealand', 'north island': 'New Zealand',
+  'south island': 'New Zealand',
+  'loyalty islands': 'France', 'new caledonia': 'France',
+  'wallis and futuna': 'France', 'french polynesia': 'France',
+  azores: 'Portugal', 'canary islands': 'Spain', madeira: 'Portugal',
+  svalbard: 'Norway',
+  'south sandwich islands': 'United Kingdom',
+  'south georgia island region': 'United Kingdom',
+  'falkland islands': 'United Kingdom',
+  'kerguelen islands': 'France',
+
+  // Oceanic ridges
+  'mid-indian ridge': 'Indian Ocean Ridge',
+  'mid-atlantic ridge': 'Atlantic Ocean Ridge',
+  'east pacific rise': 'Pacific Ocean Ridge',
+  'carlsberg ridge': 'Indian Ocean Ridge',
+  'southwest indian ridge': 'Indian Ocean Ridge',
+  'central mid-atlantic ridge': 'Atlantic Ocean Ridge',
+}
+
+// Keywords to scan the full place string when comma-parsing fails
+const KEYWORD_COUNTRY = [
+  // Order matters — more specific first
+  ['puerto rico',    'United States'],
+  ['u.s. virgin',    'United States'],
+  ['xinjiang',       'China'],
+  ['xizang',         'China'],
+  ['qinghai',        'China'],
+  ['sichuan',        'China'],
+  ['yunnan',         'China'],
+  ['tibet',          'China'],
+  ['ryukyu',         'Japan'],
+  ['honshu',         'Japan'],
+  ['hokkaido',       'Japan'],
+  ['kyushu',         'Japan'],
+  ['shikoku',        'Japan'],
+  ['kuril',          'Russia'],
+  ['kamchatka',      'Russia'],
+  ['sakhalin',       'Russia'],
+  ['sumatra',        'Indonesia'],
+  ['java',           'Indonesia'],
+  ['sulawesi',       'Indonesia'],
+  ['halmahera',      'Indonesia'],
+  ['mindanao',       'Philippines'],
+  ['luzon',          'Philippines'],
+  ['visayas',        'Philippines'],
+  ['kermadec',       'New Zealand'],
+  ['new britain',    'Papua New Guinea'],
+  ['new ireland',    'Papua New Guinea'],
+  ['new guinea',     'Papua New Guinea'],
+  ['solomon',        'Solomon Islands'],
+  ['svalbard',       'Norway'],
+  ['azores',         'Portugal'],
+  ['alaska',         'United States'],
+  ['hawaii',         'United States'],
+  ['california',     'United States'],
+  ['nevada',         'United States'],
+  ['oregon',         'United States'],
+  ['washington',     'United States'],
+  ['fiji',           'Fiji'],
+  ['tonga',          'Tonga'],
+  ['vanuatu',        'Vanuatu'],
+  ['samoa',          'Samoa'],
+  ['chile',          'Chile'],
+  ['peru',           'Peru'],
+  ['bolivia',        'Bolivia'],
+  ['ecuador',        'Ecuador'],
+  ['colombia',       'Colombia'],
+  ['venezuela',      'Venezuela'],
+  ['mexico',         'Mexico'],
+  ['nicaragua',      'Nicaragua'],
+  ['costa rica',     'Costa Rica'],
+  ['el salvador',    'El Salvador'],
+  ['guatemala',      'Guatemala'],
+  ['honduras',       'Honduras'],
+  ['panama',         'Panama'],
+  ['cuba',           'Cuba'],
+  ['haiti',          'Haiti'],
+  ['dominican',      'Dominican Republic'],
+  ['afghanistan',    'Afghanistan'],
+  ['pakistan',       'Pakistan'],
+  ['india',          'India'],
+  ['nepal',          'Nepal'],
+  ['myanmar',        'Myanmar'],
+  ['iran',           'Iran'],
+  ['iraq',           'Iraq'],
+  ['turkey',         'Turkey'],
+  ['greece',         'Greece'],
+  ['italy',          'Italy'],
+  ['romania',        'Romania'],
+  ['taiwan',         'Taiwan'],
+  ['new zealand',    'New Zealand'],
+  ['indonesia',      'Indonesia'],
+  ['philippines',    'Philippines'],
+  ['japan',          'Japan'],
+  ['china',          'China'],
+  ['russia',         'Russia'],
+  ['australia',      'Australia'],
+  ['morocco',        'Morocco'],
+  ['algeria',        'Algeria'],
+  ['kenya',          'Kenya'],
+  ['tanzania',       'Tanzania'],
+  ['ethiopia',       'Ethiopia'],
+]
+
+// Words that indicate the last segment is NOT a country name
+const NON_COUNTRY_WORDS = new Set([
+  'of', 'near', 'the', 'coast', 'region', 'area', 'ridge', 'rise',
+  'sea', 'ocean', 'islands', 'island', 'south', 'north', 'east', 'west',
+  'central', 'eastern', 'western', 'northern', 'southern', 'offshore',
+  'border', 'off', 'between',
+])
+
 function extractCountry(place) {
   if (!place) return 'Unknown'
-  const parts = place.split(',')
-  return parts[parts.length - 1].trim()
+  const lower = place.toLowerCase()
+
+  // Step 1 — try last comma segment
+  const parts   = place.split(',').map(p => p.trim())
+  const lastRaw = parts[parts.length - 1]
+  const lastLow = lastRaw.toLowerCase()
+
+  // Direct map hit
+  if (REGION_MAP[lastLow]) return REGION_MAP[lastLow]
+
+  // Clean country name: no stop words, and there's more than one segment
+  if (parts.length > 1) {
+    const words = new Set(lastLow.split(/\s+/))
+    const hasStopWord = [...words].some(w => NON_COUNTRY_WORDS.has(w))
+    if (!hasStopWord && lastRaw.length > 1) return lastRaw
+  }
+
+  // Step 2 — scan all comma segments against REGION_MAP
+  for (const part of parts) {
+    const p = part.trim().toLowerCase()
+    if (REGION_MAP[p]) return REGION_MAP[p]
+    // also try without leading directional prefix e.g. "western Sichuan" → "sichuan"
+    const words = p.split(/\s+/)
+    const last  = words[words.length - 1]
+    if (REGION_MAP[last]) return REGION_MAP[last]
+  }
+
+  // Step 3 — keyword scan of full string (ordered, most specific first)
+  for (const [kw, country] of KEYWORD_COUNTRY) {
+    if (lower.includes(kw)) return country
+  }
+
+  // Step 4 — fallback to last segment
+  return lastRaw || 'Unknown'
 }
 
 // ── Filter options ────────────────────────────────────────────────
@@ -70,7 +258,7 @@ const MAG_OPTS = [
   { label: 'M7+',   min: 7,    max: null },
 ]
 const DEPTH_OPTS = [
-  { label: 'All Depths',        min: null, max: null },
+  { label: 'All Depths',       min: null, max: null },
   { label: 'Shallow < 70 km',  min: 0,    max: 70   },
   { label: 'Medium 70-300 km', min: 70,   max: 300  },
   { label: 'Deep > 300 km',    min: 300,  max: null },
@@ -310,7 +498,6 @@ const WorldMap = React.memo(({ events, height, styleId }) => {
 export default function MapView() {
   const mapHeight = useMapHeight()
 
-  // Filter state
   const [timeIdx,         setTimeIdx]         = useState(0)
   const [magIdx,          setMagIdx]          = useState(0)
   const [depthIdx,        setDepthIdx]        = useState(0)
@@ -318,14 +505,13 @@ export default function MapView() {
   const [mapStyleId,      setMapStyleId]      = useState('dark')
   const [showFilters,     setShowFilters]     = useState(true)
   const [sortBy,          setSortBy]          = useState('time_desc')
-  const [limit,           setLimit]           = useState(10000)
+  // Load all events by default — backend now supports up to 200000
+  const [limit,           setLimit]           = useState(200000)
 
-  // Country filter — dropdown and typed input are mutually exclusive
   const [selectedCountry, setSelectedCountry] = useState('')
   const [typedCountry,    setTypedCountry]    = useState('')
   const [searchText,      setSearchText]      = useState('')
 
-  // Data state
   const [allEvents,  setAllEvents]  = useState([])
   const [stats,      setStats]      = useState(null)
   const [loading,    setLoading]    = useState(true)
@@ -359,11 +545,11 @@ export default function MapView() {
     } finally {
       setLoading(false)
     }
-  }, [timeIdx, magIdx, limit, majorOnly])
+  }, [timeIdx, magIdx, depthIdx, limit, majorOnly])
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Build sorted country list from all loaded events
+  // Build country list using accurate extractor
   const countryList = useMemo(() => {
     const counts = {}
     allEvents.forEach(e => {
@@ -375,29 +561,25 @@ export default function MapView() {
       .map(([name, count]) => ({ name, count }))
   }, [allEvents])
 
-  // Active country is whichever input was used last
   const activeCountry = selectedCountry || typedCountry.trim()
 
   // Client-side filtering
   const events = useMemo(() => {
     let data = [...allEvents]
 
-    // Depth
     const dOpt = DEPTH_OPTS[depthIdx]
     if (dOpt.min !== null) data = data.filter(e => (e.depth ?? 0) >= dOpt.min)
     if (dOpt.max !== null) data = data.filter(e => (e.depth ?? 0) <= dOpt.max)
 
-    // Country — matches against extracted last segment of place
     if (activeCountry) {
       const cq = activeCountry.toLowerCase()
+      // Use accurate extractor for filtering too
       data = data.filter(e => extractCountry(e.place).toLowerCase().includes(cq))
     }
 
-    // Free text search
     const q = searchText.trim().toLowerCase()
     if (q) data = data.filter(e => (e.place || '').toLowerCase().includes(q))
 
-    // Sort
     switch (sortBy) {
       case 'time_desc':  data.sort((a, b) => new Date(b.dt) - new Date(a.dt)); break
       case 'time_asc':   data.sort((a, b) => new Date(a.dt) - new Date(b.dt)); break
@@ -408,7 +590,6 @@ export default function MapView() {
     return data
   }, [allEvents, depthIdx, activeCountry, searchText, sortBy])
 
-  // Top locations from currently filtered events — charts always match the view
   const locations = useMemo(() => {
     const counts = {}
     events.forEach(e => {
@@ -438,7 +619,6 @@ export default function MapView() {
     }
   }
 
-  // Clicking a country in the table applies it as a filter and scrolls up
   const filterByCountry = (country) => {
     setSelectedCountry(country)
     setTypedCountry('')
@@ -515,14 +695,13 @@ export default function MapView() {
         {showFilters && (
           <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-            {/* Country filters */}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span style={s.label}>Country — Dropdown</span>
                 <select
                   value={selectedCountry}
                   onChange={e => { setSelectedCountry(e.target.value); setTypedCountry(''); setPage(1) }}
-                  style={{ ...s.select, minWidth: 250 }}
+                  style={{ ...s.select, minWidth: 260 }}
                 >
                   <option value="">All Countries ({countryList.length})</option>
                   {countryList.map(({ name, count }) => (
@@ -536,7 +715,7 @@ export default function MapView() {
                 <input
                   value={typedCountry}
                   onChange={e => { setTypedCountry(e.target.value); setSelectedCountry(''); setPage(1) }}
-                  placeholder="e.g. Japan, Nepal, USA..."
+                  placeholder="e.g. Japan, Nepal, China..."
                   style={{ ...s.input, width: 200 }}
                   onFocus={e => e.target.style.borderColor = 'var(--plasma)'}
                   onBlur={e  => e.target.style.borderColor = 'var(--bdr2)'}
@@ -556,7 +735,6 @@ export default function MapView() {
               </div>
             </div>
 
-            {/* Active country badge */}
             {activeCountry && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 11, color: 'var(--txt3)' }}>Filtering by:</span>
@@ -621,7 +799,7 @@ export default function MapView() {
                   <option value={5000}>5,000 events</option>
                   <option value={10000}>10,000 events</option>
                   <option value={50000}>50,000 events</option>
-                  <option value={200000}>All events</option>
+                  <option value={200000}>All events (200k)</option>
                 </select>
               </div>
 
