@@ -506,7 +506,7 @@ export default function MapView() {
   const [showFilters,     setShowFilters]     = useState(true)
   const [sortBy,          setSortBy]          = useState('time_desc')
   // Load all events by default — backend now supports up to 200000
-  const [limit,           setLimit]           = useState(200000)
+  const [limit,           setLimit]           = useState(10000)
 
   const [selectedCountry, setSelectedCountry] = useState('')
   const [typedCountry,    setTypedCountry]    = useState('')
