@@ -166,10 +166,52 @@ def load_ml_models():
         else:
             print(f"[SeismoIQ] Not found: {path}")
 
+async def auto_usgs_sync():
+    while True:
+        await asyncio.sleep(6 * 60 * 60)  # wait 6 hours
+        try:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=2)
+            response = requests.get(
+                "https://earthquake.usgs.gov/fdsnws/event/1/query",
+                params={
+                    'format': 'geojson',
+                    'starttime': start_time.strftime('%Y-%m-%d'),
+                    'endtime': end_time.strftime('%Y-%m-%d'),
+                    'minmagnitude': 2.5,
+                    'orderby': 'time'
+                }, timeout=30
+            )
+            features = response.json().get('features', [])
+            inserted = 0
+            with get_db() as conn:
+                cursor = conn.cursor()
+                for f in features:
+                    props = f['properties']
+                    coords = f['geometry']['coordinates']
+                    mag = props.get('mag')
+                    if not mag: continue
+                    dt = datetime.fromtimestamp(props['time'] / 1000)
+                    try:
+                        cursor.execute(
+                            "INSERT INTO std_sismicity (dt,mag,depth,lat,lon,place,is_major,source) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                            (dt, mag, coords[2], coords[1], coords[0],
+                             props.get('place','Unknown'), mag >= 5.5, 'USGS')
+                        )
+                        inserted += 1
+                    except: pass
+                conn.commit()
+            print(f"[SeismoIQ] Auto-sync: inserted {inserted} new events")
+        except Exception as e:
+            print(f"[SeismoIQ] Auto-sync error: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_ml_models()
     print(f"[SeismoIQ] Loaded {len(ml_models)} ML model files")
+    asyncio.create_task(auto_usgs_sync())
+    print("[SeismoIQ] Auto USGS sync started (every 6 hours)")
     yield
 
 # ══════════════════════════════════════════════════════════════════════
