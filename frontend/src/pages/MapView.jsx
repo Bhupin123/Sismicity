@@ -318,7 +318,7 @@ export default function MapView() {
   const [mapStyleId,      setMapStyleId]      = useState('dark')
   const [showFilters,     setShowFilters]     = useState(true)
   const [sortBy,          setSortBy]          = useState('time_desc')
-  const [limit,           setLimit]           = useState(999999)
+  const [limit,           setLimit]           = useState(10000)
 
   // Country filter — dropdown and typed input are mutually exclusive
   const [selectedCountry, setSelectedCountry] = useState('')
@@ -621,7 +621,7 @@ export default function MapView() {
                   <option value={5000}>5,000 events</option>
                   <option value={10000}>10,000 events</option>
                   <option value={50000}>50,000 events</option>
-                  <option value={999999}>All events</option>
+                  <option value={200000}>All events</option>
                 </select>
               </div>
 

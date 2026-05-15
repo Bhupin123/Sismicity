@@ -430,7 +430,7 @@ async def reset_password(req: ResetPasswordRequest):
 # ══════════════════════════════════════════════════════════════════════
 @app.get("/api/earthquakes")
 async def get_earthquakes(
-    limit:     int             = Query(500, ge=1, le=5000),
+    limit:     int             = Query(1000, ge=1, le=200000),
     offset:    int             = Query(0,   ge=0),
     min_mag:   Optional[float] = None,
     max_mag:   Optional[float] = None,
